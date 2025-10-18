@@ -1003,37 +1003,16 @@ class BleService {
         '[BleService] 🎯 Subscribing to $dataType for device $deviceId',
       );
 
-      // 1️⃣ Obtener device type (con cache) o fallback a generic
-      final deviceType = _deviceTypes[deviceId] ?? 'generic';
-      debugPrint('[BleService] 📱 Device type: $deviceType');
-
-      // 2️⃣ Cargar device implementation (con fallback automático a generic)
-      final deviceImpl = await DeviceImplementationLoader.loadOrGeneric(
-        deviceType,
+      final charInfo = await _resolveCharacteristicForDataType(
+        deviceId,
+        dataType,
       );
-
-      // 3️⃣ Buscar característica usando el index (O(1) lookup)
-      final charInfo = deviceImpl.getCharacteristicForDataType(dataType);
-
       if (charInfo == null) {
-        debugPrint(
-          '[BleService] ❌ Data type "$dataType" not found in $deviceType implementation',
-        );
-        debugPrint(
-          '[BleService]  Supported data types: ${deviceImpl.getSupportedDataTypes().join(', ')}',
-        );
         onError?.call(
-          Exception(
-            'Data type "$dataType" not supported by $deviceType device',
-          ),
+          Exception('Data type "$dataType" not supported'),
         );
         return null;
       }
-
-      debugPrint(
-        '[BleService] ✅ Found characteristic: ${charInfo.characteristicName} '
-        '(${charInfo.characteristicUuid})',
-      );
 
       // 4️⃣ Suscribirse usando el método genérico de bajo nivel
       return await _subscribeToCharacteristic(
@@ -1071,31 +1050,15 @@ class BleService {
         '[BleService] 🛑 Unsubscribing from $dataType for device $deviceId',
       );
 
-      // 1️⃣ Obtener device type (con cache) o fallback a generic
-      final deviceType = _deviceTypes[deviceId] ?? 'generic';
-      debugPrint('[BleService] 📱 Device type: $deviceType');
-
-      // 2️⃣ Cargar device implementation (con fallback automático a generic)
-      final deviceImpl = await DeviceImplementationLoader.loadOrGeneric(
-        deviceType,
+      final charInfo = await _resolveCharacteristicForDataType(
+        deviceId,
+        dataType,
       );
-
-      // 3️⃣ Buscar característica usando el index (O(1) lookup)
-      final charInfo = deviceImpl.getCharacteristicForDataType(dataType);
-
       if (charInfo == null) {
-        debugPrint(
-          '[BleService] ❌ Data type "$dataType" not found in $deviceType implementation',
-        );
         throw Exception(
-          'Data type "$dataType" not supported by $deviceType device',
+          'Data type "$dataType" not supported by device',
         );
       }
-
-      debugPrint(
-        '[BleService] ✅ Found characteristic: ${charInfo.characteristicName} '
-        '(${charInfo.characteristicUuid})',
-      );
 
       // 4️⃣ Desuscribirse usando setNotifiable con enable: false
       await setNotifiable(
@@ -1110,6 +1073,44 @@ class BleService {
       debugPrint('[BleService] ❌ Error unsubscribing from $dataType: $e');
       rethrow;
     }
+  }
+
+  /// 🔧 Método privado helper: Resolver característica para un data type
+  ///
+  /// Centraliza la lógica de: obtener device type + cargar impl + buscar char
+  /// Reutilizado por subscribeToDataType() y unsubscribeFromDataType()
+  Future<CharacteristicInfo?> _resolveCharacteristicForDataType(
+    final String deviceId,
+    final String dataType,
+  ) async {
+    // 1️⃣ Obtener device type (con cache) o fallback a generic
+    final deviceType = _deviceTypes[deviceId] ?? 'generic';
+    debugPrint('[BleService] 📱 Device type: $deviceType');
+
+    // 2️⃣ Cargar device implementation (con fallback automático a generic)
+    final deviceImpl = await DeviceImplementationLoader.loadOrGeneric(
+      deviceType,
+    );
+
+    // 3️⃣ Buscar característica usando el index (O(1) lookup)
+    final charInfo = deviceImpl.getCharacteristicForDataType(dataType);
+
+    if (charInfo == null) {
+      debugPrint(
+        '[BleService] ❌ Data type "$dataType" not found in $deviceType implementation',
+      );
+      debugPrint(
+        '[BleService]  Supported data types: ${deviceImpl.getSupportedDataTypes().join(', ')}',
+      );
+      return null;
+    }
+
+    debugPrint(
+      '[BleService] ✅ Found characteristic: ${charInfo.characteristicName} '
+      '(${charInfo.characteristicUuid})',
+    );
+
+    return charInfo;
   }
 
   /// 🔔 Suscribirse a notificaciones de una característica específica (MÉTODO PRIVADO)
