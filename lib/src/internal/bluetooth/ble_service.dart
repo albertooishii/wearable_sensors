@@ -354,9 +354,6 @@ class BleService {
   //  REMOVED: refreshSystemDevices() - upper service layer handles system devices directly
 
   /// Verificar si un dispositivo está en los resultados del escaneo
-  bool isDeviceInScanResults(final String deviceId) {
-    return _scannedDevices.containsKey(deviceId);
-  }
 
   /// Verificar si un dispositivo está bonded (paired)
   /// Retorna true si está bonded, false en caso contrario
@@ -373,27 +370,9 @@ class BleService {
 
   /// Verificar si el adaptador Bluetooth está encendido
   /// Retorna true si Bluetooth está ON, false en caso contrario
-  Future<bool> isBluetoothOn() async {
-    try {
-      final adapterState = await fbp.FlutterBluePlus.adapterState.first;
-      return adapterState == fbp.BluetoothAdapterState.on;
-    } on Exception catch (e) {
-      debugPrint('❌ Error checking Bluetooth adapter state: $e');
-      return false;
-    }
-  }
 
   /// Obtener la lista de dispositivos BLE conectados actualmente
   /// Retorna lista de device IDs (MAC addresses)
-  Future<List<String>> getConnectedDeviceIds() async {
-    try {
-      final devices = fbp.FlutterBluePlus.connectedDevices;
-      return devices.map((final d) => d.remoteId.str).toList();
-    } on Exception catch (e) {
-      debugPrint('❌ Error getting connected devices: $e');
-      return [];
-    }
-  }
 
   /// Obtener instancia de BluetoothDevice de flutter_blue_plus
   /// SOLO para uso interno de servicios de bajo nivel (xiaomi_auth_service)
@@ -1052,40 +1031,6 @@ class BleService {
   /// - getDeviceStatus() → Should use orchestrator.batteryStream instead
   /// - enrichDeviceMetadata() → Skip battery reading during enrichment
   /// - Any UI code → Subscribe to orchestrator.batteryStream  /// Monitorear estado de conexión usando Universal BLE connectionStream con callbacks
-  void startConnectionMonitoring({
-    required final String deviceId,
-    required final VoidCallback onConnected,
-    required final VoidCallback onDisconnected,
-    required final Function(Object error) onError,
-  }) {
-    // Cancelar monitoreo previo si existe
-    _connectionStreams[deviceId]?.cancel();
-
-    // Obtener BleDevice internamente
-    final bleDevice = _getBluetoothDevice(deviceId);
-
-    // Monitorear cambios de estado de conexión
-    _connectionStreams[deviceId] = bleDevice.connectionState.listen(
-      (final state) {
-        final isConnected = state == fbp.BluetoothConnectionState.connected;
-        debugPrint(
-          '📡 Connection state changed for device $deviceId: $isConnected',
-        );
-
-        if (isConnected) {
-          onConnected();
-        } else {
-          onDisconnected();
-        }
-      },
-      onError: (final error) {
-        debugPrint(
-          '❌ Connection monitoring error for device $deviceId: $error',
-        );
-        onError(error);
-      },
-    );
-  }
 
   /// Detener monitoreo de conexión para un dispositivo específico
   void stopConnectionMonitoring(final String deviceId) {
@@ -1137,79 +1082,6 @@ class BleService {
     }
   }
 
-  /// ✅ SIMPLIFICADO: Enriquecer dispositivo usando connectTemporarily() + metadata
-  ///
-  /// Este método usa la función `connectTemporarily()` ya existente y la extiende
-  /// para obtener metadata adicional (servicios, batería, RSSI).
-  ///
-  /// **Uso**: Durante escaneo para obtener info completa antes de pairing.
-  /// **Retorna**: Map con información descubierta + 'error' si falla
-  Future<Map<String, dynamic>> enrichDeviceWithTemporaryConnection(
-    final String deviceId,
-  ) async {
-    try {
-      debugPrint(
-        '🔍 [ENRICHMENT] Using connectTemporarily() + metadata for: $deviceId',
-      );
-
-      // ✅ REUTILIZAR connectTemporarily() existente (evita duplicación)
-      final bleDevice = await connectTemporarily(deviceId: deviceId);
-
-      // Obtener metadata adicional
-      final services = await bleDevice.discoverServices();
-      final serviceUuids = services
-          .map((final s) => BleUuidUtils.toShortUuid(s.serviceUuid.toString()))
-          .toList();
-
-      debugPrint(
-        '   🔍 Discovered services (short UUIDs): ${serviceUuids.join(", ")}',
-      );
-
-      // Batería (servicio 0x180F)
-      int? batteryLevel;
-      // ❌ REMOVED: Battery reading during enrichment
-      // Causes interference with SPP V2 authentication
-      // Battery will be available via orchestrator.batteryStream after connection
-      if (serviceUuids.any((final s) => s.toUpperCase().contains('180F'))) {
-        debugPrint(
-          '   📊 Battery service detected (will be read via BT_CLASSIC after auth)',
-        );
-      }
-
-      // RSSI
-      int? rssi;
-      try {
-        rssi = await bleDevice.readRssi();
-      } on Exception catch (e) {
-        debugPrint('   ⚠️ Could not read RSSI: $e');
-      }
-
-      // Desconectar después del enrichment
-      debugPrint('   🔌 Disconnecting after enrichment...');
-      await bleDevice.disconnect();
-
-      debugPrint(
-        '✅ [ENRICHMENT] Completed: ${serviceUuids.length} services, battery: ${batteryLevel ?? 'N/A'}%',
-      );
-
-      return {
-        'services': serviceUuids,
-        'batteryLevel': batteryLevel,
-        'rssi': rssi,
-        'name': bleDevice.platformName,
-      };
-    } on Exception catch (e) {
-      debugPrint('❌ [ENRICHMENT] Failed for $deviceId: $e');
-      return {
-        'services': <String>[],
-        'batteryLevel': null,
-        'rssi': null,
-        'name': null,
-        'error': e.toString(),
-      };
-    }
-  }
-
   /// 📝 Escribir valor a una característica BLE específica
   ///
   /// Método público para que upper services (como XiaomiKeepAliveService)
@@ -1220,63 +1092,6 @@ class BleService {
   /// [characteristicUuid] - UUID de la característica
   /// [value] - Bytes a escribir
   /// [withResponse] - Si esperar respuesta del dispositivo (default: true)
-  Future<void> writeValue({
-    required final String deviceId,
-    required final String serviceUuid,
-    required final String characteristicUuid,
-    required final List<int> value,
-    final bool withResponse = true,
-  }) async {
-    try {
-      debugPrint(
-        '📝 Writing ${value.length} bytes to $characteristicUuid on device $deviceId',
-      );
-
-      // Crear instancia BLE pura
-      final bleDevice = _getBluetoothDevice(deviceId);
-
-      // Verificar conexión BLE
-      final isConnected = bleDevice.isConnected;
-      if (!isConnected) {
-        throw Exception('Device $deviceId not connected');
-      }
-
-      // 🎯 Expandir UUIDs cortos a completos para flutter_blue_plus
-      final fullServiceUuid = BleUuidUtils.expandUuid(serviceUuid);
-      final fullCharUuid = BleUuidUtils.expandUuid(characteristicUuid);
-
-      debugPrint(
-        '🔍 Expanded UUIDs: $serviceUuid → $fullServiceUuid, $characteristicUuid → $fullCharUuid',
-      );
-
-      // Obtener la característica
-      final services = await bleDevice.discoverServices();
-      final service = services.firstWhere(
-        (final s) => s.serviceUuid.toString().toUpperCase().contains(
-              fullServiceUuid.toUpperCase().replaceAll('-', ''),
-            ),
-        orElse: () => throw Exception(
-          'Service "$fullServiceUuid" not found for write operation',
-        ),
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (final c) => c.characteristicUuid.toString().toUpperCase().contains(
-              fullCharUuid.toUpperCase().replaceAll('-', ''),
-            ),
-        orElse: () => throw Exception(
-          'Characteristic "$fullCharUuid" not found for write operation',
-        ),
-      );
-
-      // Escribir usando flutter_blue_plus
-      await characteristic.write(value, withoutResponse: !withResponse);
-
-      debugPrint('✅ Write successful to $characteristicUuid');
-    } on Exception catch (e) {
-      debugPrint('❌ Error writing to characteristic: $e');
-      rethrow;
-    }
-  }
 
   /// 🔔 Habilitar/deshabilitar notificaciones en una característica BLE
   ///
@@ -1779,49 +1594,6 @@ class BleService {
   /// **Returns:**
   /// - `true` if unsubscription succeeded
   /// - `false` if failed
-  Future<bool> unsubscribeFromNotifications({
-    required final String deviceId,
-    required final String serviceUuid,
-    required final String characteristicUuid,
-  }) async {
-    try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) return false;
-
-      final services = await device.discoverServices();
-
-      // Find service (with UUID normalization)
-      final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
-      final service = services.firstWhere(
-        (final s) =>
-            _normalizeUuidForComparison(s.uuid.toString()) ==
-            normalizedServiceTarget,
-        orElse: () => throw Exception('Service not found'),
-      );
-
-      // Find characteristic (with UUID normalization)
-      final normalizedCharTarget = _normalizeUuidForComparison(
-        characteristicUuid,
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (final c) =>
-            _normalizeUuidForComparison(c.uuid.toString()) ==
-            normalizedCharTarget,
-        orElse: () => throw Exception('Characteristic not found'),
-      );
-
-      await characteristic.setNotifyValue(false);
-
-      debugPrint(
-        '📡 Unsubscribed from notifications: $deviceId / ${characteristicUuid.substring(0, 8)}...',
-      );
-
-      return true;
-    } on Exception catch (e) {
-      debugPrint('❌ Failed to unsubscribe: $e');
-      return false;
-    }
-  }
 
   /// Writes data to a specific characteristic.
   ///
@@ -2139,27 +1911,6 @@ class BleService {
   /// - `false` if not found or device not connected
   ///
   /// **Note**: Compares UUIDs in normalized short format (e.g., FE95)
-  Future<bool> hasService({
-    required final String deviceId,
-    required final String serviceUuid,
-  }) async {
-    try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) return false;
-
-      final services = await device.discoverServices();
-      final normalizedTarget = _normalizeUuidForComparison(serviceUuid);
-
-      return services.any((final s) {
-        final normalizedService = _normalizeUuidForComparison(
-          s.uuid.toString(),
-        );
-        return normalizedService == normalizedTarget;
-      });
-    } on Exception {
-      return false;
-    }
-  }
 
   /// Checks if a device has a specific characteristic available.
   ///
@@ -2173,37 +1924,6 @@ class BleService {
   /// - `false` if not found or device not connected
   ///
   /// **Note**: Compares UUIDs in normalized short format (e.g., FE95)
-  Future<bool> hasCharacteristic({
-    required final String deviceId,
-    required final String serviceUuid,
-    required final String characteristicUuid,
-  }) async {
-    try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) return false;
-
-      final services = await device.discoverServices();
-      final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
-
-      final service = services.firstWhere(
-        (final s) =>
-            _normalizeUuidForComparison(s.uuid.toString()) ==
-            normalizedServiceTarget,
-        orElse: () => throw Exception('Service not found'),
-      );
-
-      final normalizedCharTarget = _normalizeUuidForComparison(
-        characteristicUuid,
-      );
-      return service.characteristics.any(
-        (final c) =>
-            _normalizeUuidForComparison(c.uuid.toString()) ==
-            normalizedCharTarget,
-      );
-    } on Exception {
-      return false;
-    }
-  }
 
   /// Establece una conexión temporal al dispositivo para obtener información actualizada
   ///
