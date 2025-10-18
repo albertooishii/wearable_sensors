@@ -382,7 +382,7 @@ class DeviceImplementationLoader {
 
     try {
       final jsonString = await rootBundle.loadString(
-        'assets/device_implementations/$deviceType.json',
+        'packages/wearable_sensors/assets/device_implementations/$deviceType.json',
       );
       final json = jsonDecode(jsonString) as Map<String, dynamic>;
       final implementation = DeviceImplementation.fromJson(json);

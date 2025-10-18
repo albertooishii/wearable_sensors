@@ -4,7 +4,9 @@ import 'package:wearable_sensors/src/internal/models/xiaomi_spp_config.dart';
 
 /// Helper to load Xiaomi device implementation configurations
 class XiaomiDeviceConfigLoader {
-  static const String _basePath = 'assets/device_implementations';
+  // ✅ Ruta correcta para assets en paquetes: packages/nombre_paquete/ruta/al/asset
+  static const String _basePath =
+      'packages/wearable_sensors/assets/device_implementations';
 
   /// Load authentication config for a specific device type
   ///

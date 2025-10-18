@@ -128,7 +128,8 @@ class DeviceTypesLoader {
   // ✅ Ruta correcta para assets en paquetes: packages/nombre_paquete/assets/...
   // Flutter maneja automáticamente los assets declarados en flutter.assets del pubspec.yaml
   // Cuando se importa como paquete externo, rootBundle necesita este prefijo
-  static const String _assetPath = 'packages/wearable_sensors/assets/data/device_types.json';
+  static const String _assetPath =
+      'packages/wearable_sensors/assets/data/device_types.json';
 
   List<DeviceType>? _deviceTypes;
   final AssetBundle? _testAssetBundle;
