@@ -26,6 +26,7 @@ import 'package:wearable_sensors/src/internal/bluetooth/spp_v2_config.dart';
 import 'package:wearable_sensors/src/internal/bluetooth/biometric_data_reader.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_connection_orchestrator.dart';
 import 'package:wearable_sensors/src/internal/models/bluetooth_device.dart';
+import 'package:wearable_sensors/src/internal/storage/discovered_device_storage.dart';
 
 /// Vendor detection result
 enum DeviceVendor { xiaomi, fitbit, apple, generic, unknown }
@@ -63,6 +64,8 @@ class DeviceConnectionManager {
   // Core services (injected during initialize)
   late final BleService _bleService;
   late final BluetoothClassicService _btClassicService;
+  DiscoveredDeviceStorage?
+      _discoveredDeviceStorage; // ✅ NEW: Storage for discovered devices
 
   // Active connections (deviceId → orchestrator)
   final Map<String, VendorOrchestrator> _activeConnections = {};
@@ -90,6 +93,12 @@ class DeviceConnectionManager {
 
   /// Public getter for BleService (needed for WearableSensors.getBluetoothStatus())
   BleService get bleService => _bleService;
+
+  /// Setter para inyectar discovered device storage
+  /// ✅ Called from WearableSensors.initialize()
+  set discoveredDeviceStorage(final DiscoveredDeviceStorage storage) {
+    _discoveredDeviceStorage = storage;
+  }
 
   /// Connection states stream (all devices)
   Stream<Map<String, ConnectionState>> get connectionStatesStream =>
@@ -270,6 +279,26 @@ class DeviceConnectionManager {
         );
       } else {
         debugPrint('   ⚠️ discoveredDeviceTypeId is null, skipping update');
+      }
+
+      // 7.5. ✅ MOMENTO 1: Save device to discovered device storage
+      // This is the primary save point after successful authentication
+      if (_discoveredDeviceStorage != null) {
+        try {
+          final currentDevice = _deviceStates[deviceId];
+          if (currentDevice != null) {
+            final deviceToSave = currentDevice.copyWith(
+              lastDiscoveredAt: DateTime.now(),
+            );
+            await _discoveredDeviceStorage!.saveDevice(deviceToSave);
+            debugPrint(
+              '💾 [DCM] Saved device to storage (Moment 1 - after connectAndAuthenticate)',
+            );
+          }
+        } catch (e) {
+          debugPrint('⚠️ [DCM] Error saving device to storage: $e');
+          // Non-critical: continue connection
+        }
       }
 
       // 8. Store in active connections

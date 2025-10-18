@@ -7,6 +7,8 @@ import '../internal/bluetooth/device_connection_manager.dart';
 import '../internal/bluetooth/biometric_data_reader.dart';
 import '../internal/bluetooth/enriched_device_scanner.dart';
 import '../internal/services/device_storage_service.dart';
+import '../internal/storage/discovered_device_storage.dart';
+import '../internal/storage/shared_preferences_discovered_device_storage.dart';
 import '../internal/config/supported_devices_config.dart';
 import '../internal/utils/device_implementation_loader.dart';
 import '../internal/vendors/xiaomi/xiaomi_device_credentials.dart';
@@ -79,6 +81,7 @@ class WearableSensors {
   DeviceConnectionManager? _connectionManager;
   DeviceStorageService? _storageService;
   BiometricDataReader? _biometricReader;
+  DiscoveredDeviceStorage? _discoveredDeviceStorage;
 
   // State tracking
   bool _isInitialized = false;
@@ -110,6 +113,17 @@ class WearableSensors {
       );
     }
     return _storageService!;
+  }
+
+  /// Internal getter for discovered device storage (creates if needed).
+  DiscoveredDeviceStorage get _discoveredStorage {
+    if (_discoveredDeviceStorage == null) {
+      throw const WearableException(
+        'WearableSensors not initialized. Call initialize() first.',
+        code: 'NOT_INITIALIZED',
+      );
+    }
+    return _discoveredDeviceStorage!;
   }
 
   // ============================================================
@@ -144,12 +158,20 @@ class WearableSensors {
       // Initialize internal services
       _instance!._connectionManager = DeviceConnectionManager();
       _instance!._storageService = DeviceStorageService();
+      _instance!._discoveredDeviceStorage =
+          SharedPreferencesDiscoveredDeviceStorage();
 
       await _instance!._connectionManager!.initialize();
       await _instance!._storageService!.initialize();
+      await _instance!._discoveredDeviceStorage!.initialize();
+
+      // ✅ Inject discovered device storage into DeviceConnectionManager
+      _instance!._connectionManager!.discoveredDeviceStorage =
+          _instance!._discoveredDeviceStorage!;
 
       if (forceReset) {
         await _instance!._storageService!.clearAll();
+        await _instance!._discoveredDeviceStorage!.cleanupAll();
       }
 
       _instance!._isInitialized = true;
@@ -368,6 +390,11 @@ class WearableSensors {
         enrichmentTimeout: enrichmentTimeout,
       );
 
+      // Inject discovered device storage for persistence (Moment 2 save)
+      if (_instance != null) {
+        scanner.discoveredDeviceStorage = _instance!._discoveredStorage;
+      }
+
       // Start scanner
       await scanner.start();
 
@@ -425,13 +452,17 @@ class WearableSensors {
   /// not necessarily through this app. They may still require app-level
   /// authentication to actually connect and read data.
   ///
-  /// **Returns:** List of system-bonded [WearableDevice] objects.
+  /// Auto-enriquecimiento: Devices are automatically enriched with
+  /// saved services from previous connections if available (from permanent cache).
+  /// This allows bonded devices to show their GATT services without re-connecting.
+  ///
+  /// **Returns:** List of system-bonded [WearableDevice] objects (auto-enriched).
   ///
   /// **Example:**
   /// ```dart
   /// final bonded = await WearableSensors.getBondedDevices();
   /// for (final device in bonded) {
-  ///   print('Bonded: ${device.name}');
+  ///   print('Bonded: ${device.name} - Enriched: ${device.isEnriched}');
   /// }
   /// ```
   static Future<List<WearableDevice>> getBondedDevices() async {
@@ -439,12 +470,81 @@ class WearableSensors {
 
     try {
       // Get bonded devices from DeviceConnectionManager
-      final bondedDevices = await _instance!._manager.getBondedDevices();
-      return bondedDevices;
+      var bondedDevices = await _instance!._manager.getBondedDevices();
+
+      // ✅ Auto-enriquecimiento: Merge with saved services from storage
+      // Similar to EnrichedDeviceScanner, but for bonded devices
+      final enrichedDevices = <WearableDevice>[];
+
+      for (final device in bondedDevices) {
+        final macAddress = device.macAddress;
+        if (macAddress != null && device.discoveredServices.isEmpty) {
+          // Check if we have saved services for this MAC address
+          final savedDevice =
+              await _instance!._discoveredStorage.getDevice(macAddress);
+          if (savedDevice != null &&
+              savedDevice.discoveredServices.isNotEmpty) {
+            // Merge: use saved services
+            enrichedDevices.add(
+              device.copyWith(
+                discoveredServices: savedDevice.discoveredServices,
+                lastDiscoveredAt: savedDevice.lastDiscoveredAt,
+              ),
+            );
+          } else {
+            // No saved services, keep as-is
+            enrichedDevices.add(device);
+          }
+        } else {
+          enrichedDevices.add(device);
+        }
+      }
+
+      return enrichedDevices;
     } catch (e, stackTrace) {
       throw WearableException(
         'Failed to get bonded devices: $e',
         code: 'BONDED_DEVICES_FAILED',
+        cause: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Gets list of all saved devices with their discovered services.
+  ///
+  /// Returns devices that have been saved after successful connection and
+  /// service discovery. This is a **historial** of devices this app has
+  /// ever connected to and enriched.
+  ///
+  /// **Use cases:**
+  /// - Show a list of "Previously connected" devices
+  /// - Migrate data when app is reinstalled
+  /// - Debug and diagnostics (see what devices were discovered)
+  ///
+  /// **Note:** This is different from [getBondedDevices()]:
+  /// - getBondedDevices() = System-level paired devices (may be empty if bonded elsewhere)
+  /// - getSavedDevices() = Devices this app has connected to and saved
+  ///
+  /// **Returns:** List of all saved [WearableDevice] objects (with full services).
+  ///
+  /// **Example:**
+  /// ```dart
+  /// final saved = await WearableSensors.getSavedDevices();
+  /// print('Previously connected devices: ${saved.length}');
+  /// for (final device in saved) {
+  ///   print('  ${device.name} (${device.macAddress}) - ${device.discoveredServices.length} services');
+  /// }
+  /// ```
+  static Future<List<WearableDevice>> getSavedDevices() async {
+    _ensureInitialized();
+
+    try {
+      return await _instance!._discoveredStorage.getAllDevices();
+    } catch (e, stackTrace) {
+      throw WearableException(
+        'Failed to get saved devices: $e',
+        code: 'SAVED_DEVICES_FAILED',
         cause: e,
         stackTrace: stackTrace,
       );
@@ -698,6 +798,22 @@ class WearableSensors {
       // 5. Delete EncryptionKeys (session keys)
       await EncryptionKeys.delete(deviceId);
       debugPrint('   ✅ Encryption keys deleted');
+
+      // 6. ✅ NEW: Delete from discovered device storage (permanent cache)
+      // This removes saved services/enrichment data for this device
+      try {
+        // The deviceId is typically the MAC address, try to delete directly
+        final wasDeleted =
+            await _instance!._discoveredStorage.deleteDevice(deviceId);
+        if (wasDeleted) {
+          debugPrint(
+            '   ✅ Removed from discovered device storage ($deviceId)',
+          );
+        }
+      } catch (e) {
+        debugPrint('   ⚠️ Could not remove from storage: $e');
+        // Non-critical: Continue
+      }
 
       debugPrint('✅ [WearableSensors] Device unpaired successfully');
     } catch (e, stackTrace) {

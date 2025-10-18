@@ -42,6 +42,9 @@ class WearableDevice {
       connectedAt: json['connectedAt'] != null
           ? DateTime.parse(json['connectedAt'] as String)
           : null,
+      lastDiscoveredAt: json['lastDiscoveredAt'] != null
+          ? DateTime.parse(json['lastDiscoveredAt'] as String)
+          : null,
       discoveredServices: (json['discoveredServices'] as List<dynamic>?)
               ?.map((final s) {
                 if (s is Map<String, dynamic>) {
@@ -70,6 +73,7 @@ class WearableDevice {
     this.lastDataTimestamp,
     this.lastSeen,
     this.connectedAt,
+    this.lastDiscoveredAt,
     this.discoveredServices = const [],
     this.isSavedDevice = false,
     this.isPairedToSystem = false,
@@ -87,6 +91,8 @@ class WearableDevice {
   final DateTime? lastDataTimestamp; // Last time biometric data received
   final DateTime? lastSeen;
   final DateTime? connectedAt;
+  final DateTime?
+      lastDiscoveredAt; // ✅ NEW: When device services were discovered and saved
   final List<GattService>
       discoveredServices; // ✅ GATT Service objects descubiertos en conexión
   final bool isSavedDevice;
@@ -99,6 +105,15 @@ class WearableDevice {
   int get servicesCount => discoveredServices.length;
   ConnectionState get status =>
       connectionState; // Alias for DeviceConnectionStatus
+
+  /// ✅ NEW: Check if device has discovered services (enriched)
+  ///
+  /// A device is "enriched" if it has GATT services discovered.
+  /// This happens after:
+  /// 1. Device is connected and authenticated
+  /// 2. Services are discovered and saved to storage
+  /// 3. The saved device is loaded from storage
+  bool get isEnriched => discoveredServices.isNotEmpty;
 
   /// Check if device is actively connected
   bool get isConnected =>
@@ -142,6 +157,7 @@ class WearableDevice {
     final DateTime? lastDataTimestamp,
     final DateTime? lastSeen,
     final DateTime? connectedAt,
+    final DateTime? lastDiscoveredAt,
     final List<GattService>? discoveredServices, // ✅ GATT Services actualizados
     final bool? isSavedDevice,
     final bool? isPairedToSystem,
@@ -158,6 +174,7 @@ class WearableDevice {
       lastDataTimestamp: lastDataTimestamp ?? this.lastDataTimestamp,
       lastSeen: lastSeen ?? this.lastSeen,
       connectedAt: connectedAt ?? this.connectedAt,
+      lastDiscoveredAt: lastDiscoveredAt ?? this.lastDiscoveredAt,
       discoveredServices: discoveredServices ?? this.discoveredServices,
       isSavedDevice: isSavedDevice ?? this.isSavedDevice,
       isPairedToSystem: isPairedToSystem ?? this.isPairedToSystem,
@@ -178,6 +195,7 @@ class WearableDevice {
       'lastDataTimestamp': lastDataTimestamp?.toIso8601String(),
       'lastSeen': lastSeen?.toIso8601String(),
       'connectedAt': connectedAt?.toIso8601String(),
+      'lastDiscoveredAt': lastDiscoveredAt?.toIso8601String(),
       'discoveredServices': discoveredServices.map((s) => s.toJson()).toList(),
       'isSavedDevice': isSavedDevice,
       'isPairedToSystem': isPairedToSystem,
@@ -287,6 +305,7 @@ class WearableDevice {
         batteryLevel == other.batteryLevel &&
         // ❌ NOT comparing: lastSeen, lastDataTimestamp (time fields)
         connectedAt == other.connectedAt &&
+        // ❌ NOT comparing: lastDiscoveredAt (reference only, not identity)
         discoveredServices.length == other.discoveredServices.length &&
         isSavedDevice == other.isSavedDevice &&
         isPairedToSystem == other.isPairedToSystem &&

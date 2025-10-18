@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart';
 
 import '../adapters/device_adapter.dart';
 import '../models/bluetooth_device.dart';
+import '../storage/discovered_device_storage.dart';
 import 'ble_service.dart';
 import '../../api/models/wearable_device.dart';
 
@@ -91,6 +92,14 @@ class EnrichedDeviceScanner {
 
   /// Whether scanner has been started
   bool _isRunning = false;
+
+  /// Storage for discovered devices (optional, for persistence)
+  DiscoveredDeviceStorage? _discoveredDeviceStorage;
+
+  /// Set the discovered device storage (dependency injection)
+  set discoveredDeviceStorage(DiscoveredDeviceStorage? storage) {
+    _discoveredDeviceStorage = storage;
+  }
 
   /// Public results stream (enriched devices)
   Stream<WearableDevice> get resultsStream => _resultsController.stream;
@@ -235,6 +244,21 @@ class EnrichedDeviceScanner {
             return enrichedDevice; // Return basic device on timeout
           },
         );
+
+        // 💾 MOMENT 2: Save enriched device to storage after service discovery
+        if (_discoveredDeviceStorage != null) {
+          try {
+            final deviceToSave = enrichedDevice.copyWith(
+              lastDiscoveredAt: DateTime.now(),
+            );
+            await _discoveredDeviceStorage!.saveDevice(deviceToSave);
+            debugPrint(
+                '💾 [EnrichedScanner] Saved device to storage (Moment 2)');
+          } catch (e) {
+            debugPrint('⚠️ [EnrichedScanner] Error saving device: $e');
+            // Non-critical error, continue anyway
+          }
+        }
       } catch (e) {
         debugPrint('⚠️  Enrichment partial for $deviceId: $e');
         // Continue with what we have
