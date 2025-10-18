@@ -60,9 +60,6 @@ class BleService {
   }
   static final BleService _instance = BleService._internal();
 
-  // ✅ Xiaomi authentication services (one per device)
-  final Map<String, XiaomiAuthService> _xiaomiAuthServices = {};
-
   // Streams principales (pueden recrearse después de dispose)
   StreamController<BluetoothConnectionState> _connectionStateController =
       StreamController<BluetoothConnectionState>.broadcast();
@@ -737,54 +734,10 @@ class BleService {
       _setupConnectionStateListener(deviceId, bleDevice);
 
       // PASO 2: Detectar si requiere autenticación Xiaomi
-      final deviceName =
-          _scannedDevices[deviceId]?.name ?? bleDevice.platformName;
-      final deviceConfig = await SupportedDevicesConfig.detectDevice(
-        deviceName,
-      );
-
-      if (deviceConfig != null && deviceConfig.requiresAuth) {
-        debugPrint('✅ Xiaomi device detected, starting authentication...');
-
-        // Cargar implementation y crear auth service
-        final deviceImpl = await DeviceImplementationLoader.load(
-          deviceConfig.deviceType,
-        );
-        final authService = XiaomiAuthService(
-          deviceId: deviceId,
-          bleService: this,
-          deviceImplementation: deviceImpl,
-        );
-        _xiaomiAuthServices[deviceId] = authService;
-        _deviceTypes[deviceId] = deviceConfig.deviceType;
-
-        // Código simplificado para reemplazar líneas 784-827
-        // Autenticar directamente (XiaomiAuthService hará discoverServices internamente)
-        final authResult = await authService.authenticate();
-
-        if (!authResult.success) {
-          // Verificar si es problema de authKey faltante
-          if (authResult.errorMessage?.contains('No credentials found') ==
-              true) {
-            debugPrint('⚠️ No authKey found, need extraction');
-            return ConnectionResult.failure(deviceId, 'authkey_required');
-          }
-
-          // Otros errores de autenticación
-          debugPrint('❌ Authentication failed: ${authResult.errorMessage}');
-          _xiaomiAuthServices.remove(deviceId);
-          return ConnectionResult.failure(
-            deviceId,
-            authResult.errorMessage ?? 'Authentication failed',
-          );
-        }
-
-        debugPrint('✅ Authentication successful!');
-        stopwatch.stop();
-        return ConnectionResult.success(
-          deviceId,
-          connectionTime: stopwatch.elapsed,
-        );
+      final authResult =
+          await _authenticateIfXiaomi(deviceId, bleDevice, stopwatch);
+      if (authResult != null) {
+        return authResult; // Ya autenticado o error
       }
 
       // PASO 3: Dispositivo no-Xiaomi (genérico)
@@ -2123,6 +2076,67 @@ class BleService {
     } on Exception catch (e) {
       debugPrint('   ❌ Device preparation failed: $e');
       throw Exception('Failed to prepare device $deviceId: $e');
+    }
+  }
+
+  /// Método privado para autenticar dispositivos Xiaomi
+  /// Retorna ConnectionResult si es Xiaomi (éxito o error), null si no es Xiaomi
+  Future<ConnectionResult?> _authenticateIfXiaomi(
+    String deviceId,
+    fbp.BluetoothDevice bleDevice,
+    Stopwatch stopwatch,
+  ) async {
+    try {
+      final deviceName =
+          _scannedDevices[deviceId]?.name ?? bleDevice.platformName;
+      final deviceConfig = await SupportedDevicesConfig.detectDevice(
+        deviceName,
+      );
+
+      if (deviceConfig == null || !deviceConfig.requiresAuth) {
+        return null; // No es Xiaomi
+      }
+
+      debugPrint('✅ Xiaomi device detected, starting authentication...');
+
+      // Cargar implementation y crear auth service
+      final deviceImpl = await DeviceImplementationLoader.load(
+        deviceConfig.deviceType,
+      );
+      final authService = XiaomiAuthService(
+        deviceId: deviceId,
+        bleService: this,
+        deviceImplementation: deviceImpl,
+      );
+      _deviceTypes[deviceId] = deviceConfig.deviceType;
+
+      // Autenticar directamente (XiaomiAuthService hará discoverServices internamente)
+      final authResult = await authService.authenticate();
+
+      if (!authResult.success) {
+        // Verificar si es problema de authKey faltante
+        if (authResult.errorMessage?.contains('No credentials found') == true) {
+          debugPrint('⚠️ No authKey found, need extraction');
+          return ConnectionResult.failure(deviceId, 'authkey_required');
+        }
+
+        // Otros errores de autenticación
+        debugPrint('❌ Authentication failed: ${authResult.errorMessage}');
+        return ConnectionResult.failure(
+          deviceId,
+          authResult.errorMessage ?? 'Authentication failed',
+        );
+      }
+
+      debugPrint('✅ Authentication successful!');
+      stopwatch.stop();
+      return ConnectionResult.success(
+        deviceId,
+        connectionTime: stopwatch.elapsed,
+      );
+    } catch (e) {
+      debugPrint('❌ Authentication exception: $e');
+      return ConnectionResult.failure(deviceId, 'Authentication failed: $e');
     }
   }
 }
