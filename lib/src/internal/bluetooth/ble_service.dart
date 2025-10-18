@@ -1999,55 +1999,14 @@ class BleService {
       // 3. Esperar estabilización
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // 4. Realizar bonding/pairing MEJORADO con CompanionDevice
-      debugPrint(
-        '   🤝 Ensuring device is bonded with CompanionDevice support...',
-      );
+      // 4. Realizar bonding
+      await _performBondingProcess(bleDevice);
 
-      // Verificar estado actual de bonding
-      final bondState = await bleDevice.bondState.first;
-      debugPrint('   Current bond state: $bondState');
+      // 5. Descubrir servicios e información
+      await _discoverServicesAndReadInfo(bleDevice);
 
-      if (bondState == fbp.BluetoothBondState.bonded) {
-        debugPrint('   ✅ Device already bonded');
-      } else {
-        debugPrint('   ⚠️ Device not bonded, initiating bonding process...');
-
-        // Crear bond tradicional primero
-        debugPrint('   🔐 Creating Bluetooth bond...');
-        await bleDevice.createBond(timeout: 60);
-        debugPrint('   ✅ Bonding request completed');
-
-        // Verificar resultado final
-        final newBondState = await bleDevice.bondState.first;
-        debugPrint('   📊 Final bond state: $newBondState');
-
-        if (newBondState != fbp.BluetoothBondState.bonded) {
-          throw Exception('Bonding failed - device not in bonded state');
-        }
-      }
-
-      debugPrint('   ✅ Device bonding and registration completed');
-
-      // 5. Descubrir servicios básicos para refrescar estado
-      debugPrint('   🔍 Discovering services for state refresh...');
-      final services = await bleDevice.discoverServices();
-      debugPrint('   📋 Discovered ${services.length} services');
-
-      // 6. Leer información básica
-      try {
-        final rssi = await bleDevice.readRssi();
-        debugPrint('   📶 Final RSSI: $rssi dBm');
-      } on Exception catch (e) {
-        debugPrint('   ⚠️ Could not read final RSSI: $e');
-      }
-
-      // 7. DESCONECTAR limpiamente
-      debugPrint('   🔌 Disconnecting cleanly...');
-      await bleDevice.disconnect();
-
-      // 8. Esperar desconexión completa
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // 6. Desconectar limpiamente
+      await _disconnectCleanly(bleDevice);
 
       debugPrint('   ✅ Device preparation completed successfully');
       debugPrint(
@@ -2126,7 +2085,8 @@ class BleService {
 
   /// Configurar MTU y descubrir servicios del dispositivo
   Future<void> _setupMtuAndDiscoverServices(
-      fbp.BluetoothDevice bleDevice) async {
+    fbp.BluetoothDevice bleDevice,
+  ) async {
     // Esperar estabilización de la conexión
     await Future.delayed(const Duration(milliseconds: 500));
 
@@ -2146,9 +2106,69 @@ class BleService {
 
   /// Validar que la conexión temporal está establecida correctamente
   Future<void> _validateTemporaryConnection(
-      fbp.BluetoothDevice bleDevice) async {
+    fbp.BluetoothDevice bleDevice,
+  ) async {
     if (!bleDevice.isConnected) {
       throw Exception('Device disconnected unexpectedly after setup');
     }
+  }
+
+  /// Realizar proceso de bonding con el dispositivo
+  Future<void> _performBondingProcess(fbp.BluetoothDevice bleDevice) async {
+    debugPrint(
+      '   🤝 Ensuring device is bonded with CompanionDevice support...',
+    );
+
+    // Verificar estado actual de bonding
+    final bondState = await bleDevice.bondState.first;
+    debugPrint('   Current bond state: $bondState');
+
+    if (bondState == fbp.BluetoothBondState.bonded) {
+      debugPrint('   ✅ Device already bonded');
+      return;
+    }
+
+    debugPrint('   ⚠️ Device not bonded, initiating bonding process...');
+
+    // Crear bond tradicional
+    debugPrint('   🔐 Creating Bluetooth bond...');
+    await bleDevice.createBond(timeout: 60);
+    debugPrint('   ✅ Bonding request completed');
+
+    // Verificar resultado final
+    final newBondState = await bleDevice.bondState.first;
+    debugPrint('   📊 Final bond state: $newBondState');
+
+    if (newBondState != fbp.BluetoothBondState.bonded) {
+      throw Exception('Bonding failed - device not in bonded state');
+    }
+
+    debugPrint('   ✅ Device bonding and registration completed');
+  }
+
+  /// Descubrir servicios y leer información básica del dispositivo
+  Future<void> _discoverServicesAndReadInfo(
+    fbp.BluetoothDevice bleDevice,
+  ) async {
+    debugPrint('   🔍 Discovering services for state refresh...');
+    final services = await bleDevice.discoverServices();
+    debugPrint('   📋 Discovered ${services.length} services');
+
+    // Leer información básica
+    try {
+      final rssi = await bleDevice.readRssi();
+      debugPrint('   📶 Final RSSI: $rssi dBm');
+    } on Exception catch (e) {
+      debugPrint('   ⚠️ Could not read final RSSI: $e');
+    }
+  }
+
+  /// Desconectar limpiamente del dispositivo
+  Future<void> _disconnectCleanly(fbp.BluetoothDevice bleDevice) async {
+    debugPrint('   🔌 Disconnecting cleanly...');
+    await bleDevice.disconnect();
+
+    // Esperar desconexión completa
+    await Future.delayed(const Duration(milliseconds: 1000));
   }
 }
