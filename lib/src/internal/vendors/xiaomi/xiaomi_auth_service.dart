@@ -354,7 +354,7 @@ class XiaomiAuthService {
         await Future.delayed(const Duration(seconds: 3));
 
         debugPrint('   🔄 Reconnecting for authentication...');
-        await bleService.connectBleOnly(deviceId);
+        await bleService.connectDevice(deviceId);
       } else {
         // ✅ Ya bonded: Solo conectar BLE
         debugPrint('   ✅ Device already bonded - connecting BLE...');
@@ -366,7 +366,7 @@ class XiaomiAuthService {
           await Future.delayed(const Duration(milliseconds: 1000));
         }
 
-        await bleService.connectBleOnly(deviceId);
+        await bleService.connectDevice(deviceId);
       }
 
       // Verificar conexión descubriendo servicios

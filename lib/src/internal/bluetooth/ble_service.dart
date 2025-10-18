@@ -7,17 +7,13 @@
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart'; // ✅ Para PlatformException
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
-import 'package:wearable_sensors/src/internal/config/supported_devices_config.dart';
 import 'package:wearable_sensors/src/internal/models/bluetooth_connection_state.dart';
 
 import 'package:wearable_sensors/src/internal/models/bluetooth_device.dart';
 import 'package:wearable_sensors/src/internal/services/permissions_service.dart';
-import 'package:wearable_sensors/wearable_sensors.dart';
 import 'package:wearable_sensors/src/internal/utils/ble_uuid_utils.dart';
 import 'package:wearable_sensors/src/internal/utils/device_implementation_loader.dart';
-import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_auth_service.dart';
 
 /// Paquete de datos BLE crudos emitido por el BleService
 class BleDataPacket {
@@ -73,8 +69,6 @@ class BleService {
 
   // 🆕 NEW ARCHITECTURE: Device type cache y scanned devices
   final Map<String, String> _deviceTypes = {}; // deviceId → deviceType
-  final Map<String, BluetoothDevice> _scannedDevices =
-      {}; // deviceId → BluetoothDevice
   final Map<String, fbp.BluetoothDevice> _connectedDevices =
       {}; // deviceId → fbp.BluetoothDevice (cache de instancias)
 
@@ -365,18 +359,6 @@ class BleService {
     }
   }
 
-  /// Verificar si el adaptador Bluetooth está encendido
-  /// Retorna true si Bluetooth está ON, false en caso contrario
-
-  /// Obtener la lista de dispositivos BLE conectados actualmente
-  /// Retorna lista de device IDs (MAC addresses)
-
-  /// Obtener instancia de BluetoothDevice de flutter_blue_plus
-  /// SOLO para uso interno de servicios de bajo nivel (xiaomi_auth_service)
-  fbp.BluetoothDevice? getFlutterBlueDevice(final String deviceId) {
-    return _connectedDevices[deviceId];
-  }
-
   /// ✅ SIMPLE: Crear fbp.BluetoothDevice directamente desde ID
   ///
   /// Wrapper directo de flutter_blue_plus BluetoothDevice.fromId()
@@ -470,8 +452,8 @@ class BleService {
           // Services will be discovered when user explicitly connects
           // _discoverServicesForScannedDevice(device, result);
 
-          // ✅ OPTIMIZED: Just emit device with advertisement data
-          _emitScannedDeviceWithAdvertisementData(device, result);
+          // ✅ HANDLED BY: EnrichedDeviceScanner in wearable_sensors
+          // Device emission is now managed by the upper layer
         }
       });
     } on Exception catch (e) {
@@ -486,46 +468,6 @@ class BleService {
       );
       rethrow;
     }
-  }
-
-  /// ✅ OPTIMIZED: Emit scanned device using ONLY advertisement data (no temp connection)
-  ///
-  /// **Benefits:**
-  /// - No battery drain from temp connections
-  /// - No connection loop issues
-  /// - Faster scan results
-  /// - Services discovered when user explicitly connects
-  ///
-  /// **Parameters:**
-  /// - [device]: FlutterBluePlus device from scan result
-  /// - [scanResult]: Scan result with advertisement data
-  void _emitScannedDeviceWithAdvertisementData(
-    final fbp.BluetoothDevice device,
-    final fbp.ScanResult scanResult,
-  ) {
-    final deviceId = device.remoteId.str;
-    final deviceName =
-        device.platformName.isNotEmpty ? device.platformName : 'Unknown Device';
-
-    // 🎯 CRÍTICO: Cachear el device REAL del scan para uso posterior
-    // Esto evita crear una nueva instancia con fromId() que puede fallar
-    _connectedDevices[deviceId] = device;
-
-    // Create device using ONLY advertisement data (no connection required)
-    final scannedDevice = BluetoothDevice.fromBasicInfo(
-      deviceId: deviceId,
-      name: deviceName,
-      services: scanResult.advertisementData.serviceUuids
-          .map((final s) => BleUuidUtils.toShortUuid(s.toString()))
-          .toList(),
-      rssi: scanResult.rssi,
-      paired: false,
-      isSystemDevice: false,
-    );
-
-    // Cache and emit
-    _scannedDevices[deviceId] = scannedDevice;
-    _rawBleDeviceController.add(scannedDevice);
   }
 
   /// 🔍 Obtener dispositivos BONDED (emparejados en Android Settings)
@@ -679,7 +621,7 @@ class BleService {
   /// NO ejecuta autenticación Xiaomi ni lógica de alto nivel.
   ///
   /// **Uso interno**: XiaomiAuthService para reconexión limpia
-  Future<fbp.BluetoothDevice> connectBleOnly(final String deviceId) async {
+  Future<fbp.BluetoothDevice> connectDevice(final String deviceId) async {
     try {
       debugPrint('🔌 Establishing basic BLE connection: $deviceId');
 
@@ -700,88 +642,6 @@ class BleService {
     } catch (e) {
       debugPrint('❌ BLE connection failed: $e');
       rethrow;
-    }
-  }
-
-  /// ✅ SIMPLIFICADO: Conectar a dispositivo con flutter_blue_plus directo
-  Future<ConnectionResult> connectDevice(final String deviceId) async {
-    try {
-      debugPrint('🔗 Connecting to device: $deviceId (includes auto-pairing)');
-      final stopwatch = Stopwatch()..start();
-
-      // 🧼 CRÍTICO: Limpiar cache GATT antes de conectar (reconexiones)
-      if (_connectedDevices.containsKey(deviceId)) {
-        debugPrint('🧼 Previous connection detected, refreshing GATT cache...');
-        await _refreshGattCache(deviceId);
-      }
-
-      // ✅ Paso 1: Obtener dispositivo y conectar (incluye pairing automático)
-      final bleDevice = await getBluetoothDeviceAsync(deviceId);
-      _connectedDevices[deviceId] = bleDevice;
-
-      if (!bleDevice.isConnected) {
-        // 🔧 Usar autoConnect=false para evitar problemas de cache
-        // Según la investigación, autoConnect puede agravar problemas de cache GATT
-        // Note: flutter_blue_plus handles pairing automatically during connect()
-        await bleDevice.connect(mtu: null, license: fbp.License.free);
-        debugPrint('✅ BLE connection established (pairing included)');
-      } else {
-        debugPrint('✅ Device already connected, reusing connection');
-      }
-
-      // 🔧 Configurar listeners oficiales de flutter_blue_plus
-      _setupServicesResetListener(deviceId, bleDevice);
-      _setupConnectionStateListener(deviceId, bleDevice);
-
-      // PASO 2: Detectar si requiere autenticación Xiaomi
-      final authResult =
-          await _authenticateIfXiaomi(deviceId, bleDevice, stopwatch);
-      if (authResult != null) {
-        return authResult; // Ya autenticado o error
-      }
-
-      // PASO 3: Dispositivo no-Xiaomi (genérico)
-      debugPrint('📱 Generic BLE device, no authentication needed');
-      _deviceTypes[deviceId] = 'generic';
-      debugPrint(
-        '✅ Connection completed in ${stopwatch.elapsedMilliseconds}ms',
-      );
-
-      return ConnectionResult.success(
-        deviceId,
-        connectionTime: stopwatch.elapsed,
-      );
-    } on PlatformException catch (e) {
-      final errorCode = _parseGattErrorCode(e.message);
-      debugPrint('❌ Connection failed: $e (code: $errorCode)');
-
-      // 🚨 Detectar si es un error de cache GATT corrupto
-      if (_isGattCacheError(errorCode, e.message)) {
-        debugPrint(
-          '🧼 GATT cache error detected, attempting refresh and retry...',
-        );
-        await _refreshGattCache(deviceId);
-
-        // Opción: Podríamos reintentar aquí, pero mejor dejamos que sea manual
-        // para evitar bucles infinitos
-        debugPrint('💡 Try reconnecting after GATT cache refresh');
-      }
-
-      return ConnectionResult.failure(
-        deviceId,
-        e.message ?? e.toString(),
-        errorCode: errorCode,
-      );
-    } on Exception catch (e) {
-      debugPrint('❌ Connection failed: $e');
-
-      // 🚨 También verificar errores generales que podrían ser cache
-      if (_isGattCacheError(null, e.toString())) {
-        debugPrint('🧼 Potential GATT cache issue detected in generic error');
-        await _refreshGattCache(deviceId);
-      }
-
-      return ConnectionResult.failure(deviceId, e.toString());
     }
   }
 
@@ -829,83 +689,6 @@ class BleService {
     }
   }
 
-  /// Configurar listener oficial onServicesReset de flutter_blue_plus
-  void _setupServicesResetListener(
-    final String deviceId,
-    final fbp.BluetoothDevice bleDevice,
-  ) {
-    // Usar el stream oficial para detectar cuando los servicios cambian
-    bleDevice.onServicesReset.listen(
-      (_) {
-        debugPrint(
-          '🔄 Services Reset detected for $deviceId - re-discovering services',
-        );
-        // Ejecutar redescubrimiento de forma asíncrona pero no bloquear el listener
-        _handleServicesReset(deviceId, bleDevice);
-      },
-      onError: (final error) {
-        debugPrint('❌ onServicesReset stream error for $deviceId: $error');
-      },
-    );
-  }
-
-  /// Manejar reset de servicios de forma asíncrona
-  Future<void> _handleServicesReset(
-    final String deviceId,
-    final fbp.BluetoothDevice bleDevice,
-  ) async {
-    try {
-      // Re-descubrir servicios cuando cambian (método oficial)
-      await bleDevice.discoverServices();
-      debugPrint('✅ Service rediscovery completed after Services Reset');
-    } on Exception catch (e) {
-      debugPrint('❌ Error re-discovering services after reset: $e');
-    }
-  }
-
-  /// Configurar listener oficial connectionState de flutter_blue_plus
-  void _setupConnectionStateListener(
-    final String deviceId,
-    final fbp.BluetoothDevice bleDevice,
-  ) {
-    // Usar el stream oficial para monitorear estados de conexión
-    bleDevice.connectionState.listen(
-      (final fbp.BluetoothConnectionState state) async {
-        debugPrint('🔗 Connection state changed for $deviceId: $state');
-
-        if (state == fbp.BluetoothConnectionState.disconnected) {
-          // Usar la propiedad oficial disconnectReason de flutter_blue_plus
-          final disconnectReason = bleDevice.disconnectReason;
-          if (disconnectReason != null) {
-            debugPrint(
-              '📊 Official disconnect reason: ${disconnectReason.code} - ${disconnectReason.description}',
-            );
-
-            // Detectar problemas de GATT cache usando códigos oficiales
-            if (_isGattCacheError(
-              disconnectReason.code?.toString(),
-              disconnectReason.description,
-            )) {
-              debugPrint(
-                '🧼 GATT cache corruption detected, refreshing cache...',
-              );
-              await _refreshGattCache(deviceId);
-            }
-          }
-
-          // Según la documentación oficial: "you must always re-discover services after disconnection!"
-          debugPrint(
-            '🔄 Connection lost - will need to re-discover services on next connect',
-          );
-          _discoveredServices.remove(deviceId);
-        }
-      },
-      onError: (final error) {
-        debugPrint('❌ connectionState stream error for $deviceId: $error');
-      },
-    );
-  }
-
   /// Desconectar dispositivo (SOLO desconexión BLE de bajo nivel)
   Future<void> disconnectDevice(final String deviceId) async {
     try {
@@ -938,38 +721,6 @@ class BleService {
       debugPrint('✅ BLE device $deviceId disconnected successfully');
     } on Exception catch (e) {
       debugPrint('❌ Error disconnecting BLE device $deviceId: $e');
-    }
-  }
-
-  /// Obtener estado detallado de un dispositivo BLE puro
-  Future<WearableDevice> getDeviceStatus(final String deviceId) async {
-    try {
-      // Crear instancia BLE pura sin conocer WearableDevice
-      final bleDevice = _getBluetoothDevice(deviceId);
-
-      // Verificar conexión BLE
-      final isConnected = bleDevice.isConnected;
-
-      return WearableDevice(
-        deviceId: deviceId,
-        name: 'BLE Device', // Default name
-        deviceTypeId: 'smartwatch',
-        connectionState: isConnected
-            ? ConnectionState.connected
-            : ConnectionState.disconnected,
-        rssi: -60, // Default RSSI for BLE
-        lastSeen: DateTime.now(),
-      );
-    } on Exception catch (e) {
-      debugPrint('❌ Error getting BLE device status: $e');
-      return WearableDevice(
-        deviceId: deviceId,
-        name: 'BLE Device',
-        deviceTypeId: 'smartwatch',
-        connectionState: ConnectionState.error,
-        rssi: -100, // Very weak signal
-        lastSeen: DateTime.now(),
-      );
     }
   }
 
@@ -1444,110 +1195,6 @@ class BleService {
     debugPrint('🔵 BleService disposed');
   }
 
-  /// ✅ FASE C: Parsear código de error GATT desde PlatformException
-  ///
-  /// Ejemplos de mensajes:
-  /// - "GATT Error 147" → "147"
-  /// - "Error 133" → "133"
-  /// - "Connection failed with error code 19" → "19"
-  /// - "Unknown error" → null
-  static String? _parseGattErrorCode(final String? message) {
-    if (message == null) return null;
-
-    // Pattern 1: "GATT Error 147"
-    final gattPattern = RegExp(r'GATT Error (\d+)');
-    final gattMatch = gattPattern.firstMatch(message);
-    if (gattMatch != null) {
-      return gattMatch.group(1);
-    }
-
-    // Pattern 2: "Error 133"
-    final errorPattern = RegExp(r'Error (\d+)');
-    final errorMatch = errorPattern.firstMatch(message);
-    if (errorMatch != null) {
-      return errorMatch.group(1);
-    }
-
-    // Pattern 3: "error code 19" (case insensitive)
-    final codePattern = RegExp(r'error code (\d+)', caseSensitive: false);
-    final codeMatch = codePattern.firstMatch(message);
-    if (codeMatch != null) {
-      return codeMatch.group(1);
-    }
-
-    // Pattern 4: "REMOTE_USER_TERMINATED_CONNECTION" (status 19)
-    if (message.contains('REMOTE_USER_TERMINATED_CONNECTION')) {
-      return '19';
-    }
-
-    // Pattern 5: "GATT_INTERNAL_ERROR" (status 129)
-    if (message.contains('GATT_INTERNAL_ERROR')) {
-      return '129';
-    }
-
-    // Pattern 6: "GATT_ERROR" (status 133)
-    if (message.contains('GATT_ERROR')) {
-      return '133';
-    }
-
-    // No match found
-    return null;
-  }
-
-  /// 🚨 Detectar si un error GATT indica cache corrupto
-  /// Basado en investigación de Stack Overflow sobre Android BLE
-  static bool _isGattCacheError(
-    final String? errorCode,
-    final String? message,
-  ) {
-    if (errorCode == null && message == null) return false;
-
-    // Códigos de error GATT que indican cache corrupto
-    final cacheErrorCodes = ['19', '129', '133'];
-    if (errorCode != null && cacheErrorCodes.contains(errorCode)) {
-      return true;
-    }
-
-    // Mensajes de error que indican cache corrupto
-    final cacheErrorMessages = [
-      'REMOTE_USER_TERMINATED_CONNECTION',
-      'GATT_INTERNAL_ERROR',
-      'GATT_ERROR',
-      'device is disconnected',
-      'service discovery failed',
-    ];
-
-    if (message != null) {
-      for (final errorMsg in cacheErrorMessages) {
-        if (message.toLowerCase().contains(errorMsg.toLowerCase())) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  // ============================================================================
-  // BLE Characteristic Abstraction Layer (for auth protocols)
-  // ============================================================================
-
-  // ❌ DEPRECATED: subscribeToNotifications() eliminado
-  // ✅ USE: setNotifiable() instead - it properly sets up onValueReceived listener
-  // Razón: subscribeToNotifications() solo hacía setNotifyValue(true) pero NO configuraba
-  // el listener de characteristic.onValueReceived, por lo que nunca recibíamos notificaciones.
-
-  /// Unsubscribes from notifications on a specific characteristic.
-  ///
-  /// **Parameters:**
-  /// - [deviceId]: Device MAC address
-  /// - [serviceUuid]: Service UUID
-  /// - [characteristicUuid]: Characteristic UUID
-  ///
-  /// **Returns:**
-  /// - `true` if unsubscription succeeded
-  /// - `false` if failed
-
   /// Writes data to a specific characteristic.
   ///
   /// **Purpose:** Abstraction for authentication protocol writes
@@ -1853,102 +1500,6 @@ class BleService {
     return cleaned;
   }
 
-  /// Checks if a device has a specific service available.
-  ///
-  /// **Parameters:**
-  /// - [deviceId]: Device MAC address
-  /// - [serviceUuid]: Service UUID to check (accepts short or long format)
-  ///
-  /// **Returns:**
-  /// - `true` if service exists
-  /// - `false` if not found or device not connected
-  ///
-  /// **Note**: Compares UUIDs in normalized short format (e.g., FE95)
-
-  /// Checks if a device has a specific characteristic available.
-  ///
-  /// **Parameters:**
-  /// - [deviceId]: Device MAC address
-  /// - [serviceUuid]: Service UUID (accepts short or long format)
-  /// - [characteristicUuid]: Characteristic UUID (accepts short or long format)
-  ///
-  /// **Returns:**
-  /// - `true` if characteristic exists
-  /// - `false` if not found or device not connected
-  ///
-  /// **Note**: Compares UUIDs in normalized short format (e.g., FE95)
-
-  /// Establece una conexión temporal al dispositivo para obtener información actualizada
-  ///
-  /// **Propósito:**
-  /// - Conectar temporalmente a un dispositivo para refrescar su información
-  /// - Descubrir servicios y características disponibles
-  /// - Leer información básica como RSSI
-  /// - Preparar el dispositivo para operaciones posteriores
-  ///
-  /// **Parámetros:**
-  /// - [deviceId]: Dirección MAC del dispositivo
-  /// - [timeout]: Tiempo máximo para la conexión (default: 15 segundos)
-  /// - [requestMtu]: MTU a solicitar (default: 247 bytes)
-  ///
-  /// **Retorna:**
-  /// - [fbp.BluetoothDevice] conectado y listo para usar
-  ///
-  /// **Throws:**
-  /// - [Exception] si no se puede conectar o el dispositivo no existe
-  ///
-  /// **Uso:**
-  /// ```dart
-  /// final connectedDevice = await bleService.connectTemporarily(
-  ///   deviceId: 'AA:BB:CC:DD:EE:FF',
-  ///   timeout: Duration(seconds: 20),
-  /// );
-  /// // El dispositivo queda conectado y listo para autenticación
-  /// ```
-  Future<fbp.BluetoothDevice> connectTemporarily({
-    required final String deviceId,
-    final Duration timeout = const Duration(seconds: 15),
-    final int requestMtu = 247,
-  }) async {
-    debugPrint('🔗 BleService: Connecting temporarily to $deviceId...');
-
-    try {
-      // 1. Obtener dispositivo actualizado (evitar cache stale)
-      debugPrint('   📡 Getting fresh device instance...');
-      final bleDevice = await getBluetoothDeviceAsync(deviceId);
-      debugPrint(
-        '   ✅ Got device: ${bleDevice.platformName} (${bleDevice.remoteId.str})',
-      );
-
-      // 2. Conectar si no está conectado
-      if (!bleDevice.isConnected) {
-        debugPrint('   📶 Connecting to device...');
-        await bleDevice.connect(
-          mtu: requestMtu,
-          timeout: timeout,
-          license: fbp.License.free,
-        );
-        debugPrint('   ✅ Connected successfully');
-      } else {
-        debugPrint('   ✅ Device already connected');
-      }
-
-      // 3. Setup y validación
-      await _setupMtuAndDiscoverServices(bleDevice);
-      await _validateTemporaryConnection(bleDevice);
-
-      debugPrint('   ✅ Temporary connection established successfully');
-      debugPrint('   📊 Device state: connected=${bleDevice.isConnected}');
-
-      return bleDevice;
-    } on Exception catch (e) {
-      debugPrint('   ❌ Temporary connection failed: $e');
-      throw Exception(
-        'Failed to establish temporary connection to $deviceId: $e',
-      );
-    }
-  }
-
   /// Prepara un dispositivo con ciclo completo: conectar → bond → desconectar
   ///
   /// **Propósito:**
@@ -2017,99 +1568,6 @@ class BleService {
     } on Exception catch (e) {
       debugPrint('   ❌ Device preparation failed: $e');
       throw Exception('Failed to prepare device $deviceId: $e');
-    }
-  }
-
-  /// Método privado para autenticar dispositivos Xiaomi
-  /// Retorna ConnectionResult si es Xiaomi (éxito o error), null si no es Xiaomi
-  Future<ConnectionResult?> _authenticateIfXiaomi(
-    String deviceId,
-    fbp.BluetoothDevice bleDevice,
-    Stopwatch stopwatch,
-  ) async {
-    try {
-      final deviceName =
-          _scannedDevices[deviceId]?.name ?? bleDevice.platformName;
-      final deviceConfig = await SupportedDevicesConfig.detectDevice(
-        deviceName,
-      );
-
-      if (deviceConfig == null || !deviceConfig.requiresAuth) {
-        return null; // No es Xiaomi
-      }
-
-      debugPrint('✅ Xiaomi device detected, starting authentication...');
-
-      // Cargar implementation y crear auth service
-      final deviceImpl = await DeviceImplementationLoader.load(
-        deviceConfig.deviceType,
-      );
-      final authService = XiaomiAuthService(
-        deviceId: deviceId,
-        bleService: this,
-        deviceImplementation: deviceImpl,
-      );
-      _deviceTypes[deviceId] = deviceConfig.deviceType;
-
-      // Autenticar directamente (XiaomiAuthService hará discoverServices internamente)
-      final authResult = await authService.authenticate();
-
-      if (!authResult.success) {
-        // Verificar si es problema de authKey faltante
-        if (authResult.errorMessage?.contains('No credentials found') == true) {
-          debugPrint('⚠️ No authKey found, need extraction');
-          return ConnectionResult.failure(deviceId, 'authkey_required');
-        }
-
-        // Otros errores de autenticación
-        debugPrint('❌ Authentication failed: ${authResult.errorMessage}');
-        return ConnectionResult.failure(
-          deviceId,
-          authResult.errorMessage ?? 'Authentication failed',
-        );
-      }
-
-      debugPrint('✅ Authentication successful!');
-      stopwatch.stop();
-      return ConnectionResult.success(
-        deviceId,
-        connectionTime: stopwatch.elapsed,
-      );
-    } catch (e) {
-      debugPrint('❌ Authentication exception: $e');
-      return ConnectionResult.failure(deviceId, 'Authentication failed: $e');
-    }
-  }
-
-  /// Métodos privados para setup y validación de conexiones
-
-  /// Configurar MTU y descubrir servicios del dispositivo
-  Future<void> _setupMtuAndDiscoverServices(
-    fbp.BluetoothDevice bleDevice,
-  ) async {
-    // Esperar estabilización de la conexión
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Descubrir servicios para refrescar estado del dispositivo
-    debugPrint('   🔍 Discovering services...');
-    final services = await bleDevice.discoverServices();
-    debugPrint('   📋 Discovered ${services.length} services');
-
-    // Leer información básica del dispositivo
-    try {
-      final rssi = await bleDevice.readRssi();
-      debugPrint('   📶 Current RSSI: $rssi dBm');
-    } on Exception catch (e) {
-      debugPrint('   ⚠️ Could not read RSSI: $e');
-    }
-  }
-
-  /// Validar que la conexión temporal está establecida correctamente
-  Future<void> _validateTemporaryConnection(
-    fbp.BluetoothDevice bleDevice,
-  ) async {
-    if (!bleDevice.isConnected) {
-      throw Exception('Device disconnected unexpectedly after setup');
     }
   }
 
