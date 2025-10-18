@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../internal/adapters/device_adapter.dart';
 import '../internal/bluetooth/device_connection_manager.dart';
 import '../internal/bluetooth/biometric_data_reader.dart';
+import '../internal/bluetooth/enriched_device_scanner.dart';
 import '../internal/services/device_storage_service.dart';
 import '../internal/config/supported_devices_config.dart';
 import '../internal/utils/device_implementation_loader.dart';
@@ -272,8 +273,44 @@ class WearableSensors {
   static Stream<WearableDevice> scan({
     Duration duration = const Duration(seconds: 10),
     List<String>? filterByServices,
+    bool enriched = false,
+    int parallelism = 3,
+    Duration enrichmentTimeout = const Duration(seconds: 3),
   }) async* {
     _ensureInitialized();
+
+    try {
+      if (enriched) {
+        // ✅ ENRICHED SCAN: Connect to each device to get full info
+        yield* _scanEnriched(
+          duration: duration,
+          parallelism: parallelism,
+          enrichmentTimeout: enrichmentTimeout,
+          filterByServices: filterByServices,
+        );
+      } else {
+        // ✅ BASIC SCAN: Fast BLE discovery only (no connections)
+        yield* _scanBasic(
+          duration: duration,
+          filterByServices: filterByServices,
+        );
+      }
+    } catch (e, stackTrace) {
+      throw ConnectionException(
+        'Failed to scan for devices: $e',
+        code: 'SCAN_FAILED',
+        cause: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Basic BLE scan - Fast discovery without enrichment
+  static Stream<WearableDevice> _scanBasic({
+    required Duration duration,
+    List<String>? filterByServices,
+  }) async* {
+    debugPrint('📡 Starting BASIC scan (${duration.inSeconds}s)...');
 
     try {
       // Start scanning via DeviceConnectionManager
@@ -283,31 +320,82 @@ class WearableSensors {
       await for (final bleDevice
           in _instance!._manager.discoveredDevicesStream) {
         // Apply service filter if provided (post-scan filtering)
-        // Note: We filter at app level instead of native level because:
-        // - Not all devices advertise services in BLE advertisement
-        // - Some services are only available after connection
-        // - Filtering at app level gives better compatibility
         if (filterByServices != null && filterByServices.isNotEmpty) {
-          // Check if device advertises any of the requested services
           final hasRequestedService = bleDevice.services.any(
             (serviceUuid) =>
                 filterByServices.contains(serviceUuid.toLowerCase()),
           );
 
           if (!hasRequestedService) {
-            continue; // Skip devices that don't have requested services
+            continue;
           }
         }
 
         yield await DeviceAdapter.fromInternal(bleDevice);
       }
     } catch (e, stackTrace) {
+      debugPrint('❌ Basic scan failed: $e');
       throw ConnectionException(
-        'Failed to scan for devices: $e',
-        code: 'SCAN_FAILED',
+        'Basic scan failed: $e',
+        code: 'BASIC_SCAN_FAILED',
         cause: e,
         stackTrace: stackTrace,
       );
+    }
+  }
+
+  /// Enriched scan - Discovers devices with full info (services, battery, type)
+  static Stream<WearableDevice> _scanEnriched({
+    required Duration duration,
+    required int parallelism,
+    required Duration enrichmentTimeout,
+    List<String>? filterByServices,
+  }) async* {
+    debugPrint(
+      '🔍 Starting ENRICHED scan (${duration.inSeconds}s, parallelism: $parallelism)...',
+    );
+
+    late EnrichedDeviceScanner scanner;
+
+    try {
+      // Import the scanner
+      scanner = EnrichedDeviceScanner(
+        bleService: _instance!._manager.bleService,
+        discoveredDevicesStream:
+            _instance!._manager.bleService.rawBleDevicesStream,
+        duration: duration,
+        parallelism: parallelism,
+        enrichmentTimeout: enrichmentTimeout,
+      );
+
+      // Start scanner
+      await scanner.start();
+
+      // Emit enriched devices
+      await for (final enrichedDevice in scanner.resultsStream) {
+        // Apply filter if provided
+        if (filterByServices != null && filterByServices.isNotEmpty) {
+          final hasRequestedService = enrichedDevice.discoveredServices.any(
+            (service) => filterByServices.contains(service.uuid.toLowerCase()),
+          );
+
+          if (!hasRequestedService) {
+            continue;
+          }
+        }
+
+        yield enrichedDevice;
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ Enriched scan failed: $e');
+      throw ConnectionException(
+        'Enriched scan failed: $e',
+        code: 'ENRICHED_SCAN_FAILED',
+        cause: e,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      await scanner.dispose();
     }
   }
 
