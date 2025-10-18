@@ -12,8 +12,8 @@
 
 import '../enums/connection_state.dart';
 import '../exceptions/connection_exception.dart';
-import '../ble_services_catalog.dart';
-import 'ble_service_info.dart';
+import '../gatt_services_catalog.dart';
+import 'gatt_service.dart';
 import 'device_types_loader.dart' as loader;
 
 /// Unified device state for UI
@@ -45,14 +45,14 @@ class WearableDevice {
       discoveredServices: (json['discoveredServices'] as List<dynamic>?)
               ?.map((final s) {
                 if (s is Map<String, dynamic>) {
-                  return BleServiceInfo.fromJson(
+                  return GattService.fromJson(
                     s['uuid'] as String,
                     s,
                   );
                 }
                 return null;
               })
-              .whereType<BleServiceInfo>()
+              .whereType<GattService>()
               .toList() ??
           const [],
       isSavedDevice: json['isSavedDevice'] as bool? ?? false,
@@ -87,8 +87,8 @@ class WearableDevice {
   final DateTime? lastDataTimestamp; // Last time biometric data received
   final DateTime? lastSeen;
   final DateTime? connectedAt;
-  final List<BleServiceInfo>
-      discoveredServices; // ✅ CAMBIO: BleService objects en lugar de strings
+  final List<GattService>
+      discoveredServices; // ✅ GATT Service objects descubiertos en conexión
   final bool isSavedDevice;
   final bool isPairedToSystem;
   final int? rssi; // Signal strength
@@ -142,7 +142,7 @@ class WearableDevice {
     final DateTime? lastDataTimestamp,
     final DateTime? lastSeen,
     final DateTime? connectedAt,
-    final List<BleServiceInfo>? discoveredServices, // ✅ CAMBIO: BleService list
+    final List<GattService>? discoveredServices, // ✅ GATT Services actualizados
     final bool? isSavedDevice,
     final bool? isPairedToSystem,
     final int? rssi,
@@ -213,22 +213,22 @@ class WearableDevice {
 
   /// Enriquecer servicios desde lista de UUID strings
   ///
-  /// Este método carga los BleService objects desde UUIDs.
+  /// Este método carga los GattService objects desde UUIDs.
   /// Se llama después de `fromBluetoothDevice()` para llenar los servicios.
   static Future<WearableDevice> enrichServicesFromUuids(
     final WearableDevice device,
     final List<String> serviceUuids,
   ) async {
-    final enrichedServices = <BleServiceInfo>[];
+    final enrichedServices = <GattService>[];
 
     for (final uuid in serviceUuids) {
-      final service = await BleServicesCatalog.getService(uuid);
+      final service = await GattServicesCatalog.getService(uuid);
       if (service != null) {
         enrichedServices.add(service);
       } else {
-        // Crear un BleService "unknown" para UUIDs no reconocidos
+        // Crear un GattService "unknown" para UUIDs no reconocidos
         enrichedServices.add(
-          BleServiceInfo(
+          GattService(
             uuid: uuid,
             name: 'Unknown Service',
             description: 'Unknown service UUID',

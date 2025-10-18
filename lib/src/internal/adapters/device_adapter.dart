@@ -17,9 +17,12 @@ class DeviceAdapter {
   /// Maps internal bluetooth-specific fields to the public API model,
   /// providing a vendor-agnostic representation.
   ///
-  /// **Note:** Since [BluetoothDevice] is a minimal scan result model,
-  /// many fields are set to defaults. Full device state should be queried
-  /// after connection.
+  /// **Incluye enriquecimiento de servicios GATT:**
+  /// - Si [BluetoothDevice.services] contiene UUIDs, se convierten a [GattService] objects
+  /// - Cada UUID se busca en el catálogo GATT para obtener metadatos completos
+  /// - El dispositivo retornado incluye `discoveredServices` enriquecidos
+  ///
+  /// **Note:** This is async because it needs to load GATT service metadata.
   static Future<WearableDevice> fromInternal(
     BluetoothDevice internal, {
     bool? isSavedDevice,
@@ -37,7 +40,8 @@ class DeviceAdapter {
       }
     }
 
-    return WearableDevice(
+    // Crear device base
+    final baseDevice = WearableDevice(
       deviceId: internal.deviceId,
       connectionState: internal.paired
           ? ConnectionState.disconnected
@@ -49,11 +53,21 @@ class DeviceAdapter {
       lastDataTimestamp: null,
       lastSeen: DateTime.now(),
       connectedAt: null,
-      discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
+      discoveredServices: [], // Será enriquecido abajo
       isSavedDevice: isSavedDevice ?? false,
       isPairedToSystem: internal.paired,
       rssi: internal.rssi,
     );
+
+    // Enriquecer con servicios GATT si hay UUIDs disponibles
+    if (internal.services.isNotEmpty) {
+      return await WearableDevice.enrichServicesFromUuids(
+        baseDevice,
+        internal.services,
+      );
+    }
+
+    return baseDevice;
   }
 
   /// Converts internal device capabilities to public [DeviceCapabilities].

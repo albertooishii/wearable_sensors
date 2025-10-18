@@ -47,7 +47,7 @@ export 'src/api/enums/sensor_type.dart';
 // PUBLIC MODELS
 // ============================================================
 export 'src/api/models/auth_credentials.dart';
-export 'src/api/models/ble_service_info.dart'; // ✅ NUEVO: BleServiceInfo model (agnóstico)
+export 'src/api/models/gatt_service.dart'; // ✅ GATT Service model (agnóstico, descubierto en conexión)
 export 'src/api/models/bluetooth_status.dart';
 export 'src/api/models/device_capabilities.dart';
 export 'src/api/models/device_types_loader.dart';
@@ -57,7 +57,7 @@ export 'src/api/models/wearable_device.dart';
 // ============================================================
 // PUBLIC SERVICES
 // ============================================================
-export 'src/api/ble_services_catalog.dart'; // ✅ NUEVO: BleServicesCatalog
+export 'src/api/gatt_services_catalog.dart'; // ✅ GATT Services Catalog
 
 // ============================================================
 // PUBLIC EXCEPTIONS
