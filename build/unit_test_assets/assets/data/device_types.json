@@ -1,0 +1,702 @@
+[
+    {
+        "id": "xiaomi_mi_band",
+        "name": "Xiaomi Smart Band",
+        "icon": "watch",
+        "color": "orange",
+        "category": "fitness",
+        "vendor": "xiaomi",
+        "description": "Xiaomi Smart Band series fitness tracker",
+        "detection": {
+            "required_services": [
+                "FDAB",
+                "FE95"
+            ],
+            "optional_services": [
+                "FEE0",
+                "FEE1",
+                "180D",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "fitbit_tracker",
+        "name": "Fitbit Tracker",
+        "icon": "watch",
+        "color": "green",
+        "category": "fitness",
+        "vendor": "fitbit",
+        "description": "Fitbit fitness tracker or smartwatch",
+        "detection": {
+            "required_services": [
+                "FEAA",
+                "180D"
+            ],
+            "optional_services": [
+                "ADAB",
+                "8220",
+                "180F",
+                "181A"
+            ]
+        }
+    },
+    {
+        "id": "garmin_device",
+        "name": "Garmin Device",
+        "icon": "watch",
+        "color": "blue",
+        "category": "fitness",
+        "vendor": "garmin",
+        "description": "Garmin fitness watch or device",
+        "detection": {
+            "required_services": [
+                "FEC6"
+            ],
+            "optional_services": [
+                "FEC7",
+                "FEC8",
+                "180D",
+                "180F",
+                "1814",
+                "1816"
+            ]
+        }
+    },
+    {
+        "id": "apple_watch",
+        "name": "Apple Watch",
+        "icon": "watch",
+        "color": "grey",
+        "category": "fitness",
+        "vendor": "apple",
+        "description": "Apple Watch with comprehensive health monitoring",
+        "detection": {
+            "required_services": [
+                "BC2F4CC6",
+                "7905F431"
+            ],
+            "optional_services": [
+                "89D3502B",
+                "9FA480E0",
+                "D0611E78"
+            ]
+        }
+    },
+    {
+        "id": "smartwatch",
+        "name": "Smartwatch",
+        "icon": "watch",
+        "color": "blue",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Smart wearable device with health monitoring",
+        "detection": {
+            "required_services": [
+                "180D",
+                "180F"
+            ],
+            "optional_services": [
+                "181A",
+                "1822",
+                "183E"
+            ]
+        }
+    },
+    {
+        "id": "fitness_tracker",
+        "name": "Fitness Tracker",
+        "icon": "fitness_center",
+        "color": "orange",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Fitness and activity tracking device",
+        "detection": {
+            "required_services": [
+                "1826"
+            ],
+            "optional_services": [
+                "180D",
+                "180F",
+                "183E"
+            ]
+        }
+    },
+    {
+        "id": "heart_rate_monitor",
+        "name": "Heart Rate Monitor",
+        "icon": "favorite",
+        "color": "red",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Dedicated heart rate monitoring device",
+        "detection": {
+            "required_services": [
+                "180D"
+            ],
+            "optional_services": []
+        }
+    },
+    {
+        "id": "sleep_tracker",
+        "name": "Sleep Tracker",
+        "icon": "bedtime",
+        "color": "indigo",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Sleep monitoring and analysis device",
+        "detection": {
+            "required_services": [
+                "184A"
+            ],
+            "optional_services": [
+                "180D",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "activity_tracker",
+        "name": "Activity Tracker",
+        "icon": "fitness_center",
+        "color": "green",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Activity and movement tracking device",
+        "detection": {
+            "required_services": [
+                "183E"
+            ],
+            "optional_services": [
+                "180D",
+                "180F",
+                "1814"
+            ]
+        }
+    },
+    {
+        "id": "running_watch",
+        "name": "Running Watch",
+        "icon": "directions_run",
+        "color": "blueGrey",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Specialized running and sports watch",
+        "detection": {
+            "required_services": [
+                "1814"
+            ],
+            "optional_services": [
+                "180D",
+                "180F",
+                "181A"
+            ]
+        }
+    },
+    {
+        "id": "cycling_computer",
+        "name": "Cycling Computer",
+        "icon": "directions_bike",
+        "color": "brown",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Cycling performance and navigation device",
+        "detection": {
+            "required_services": [
+                "1816"
+            ],
+            "optional_services": [
+                "180D",
+                "180F",
+                "1818"
+            ]
+        }
+    },
+    {
+        "id": "fitness_scale",
+        "name": "Fitness Scale",
+        "icon": "monitor_weight",
+        "color": "purple",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Smart body composition scale",
+        "detection": {
+            "required_services": [
+                "181D"
+            ],
+            "optional_services": [
+                "181B",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "blood_pressure_monitor",
+        "name": "Blood Pressure Monitor",
+        "icon": "favorite",
+        "color": "pink",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Blood pressure monitoring device",
+        "detection": {
+            "required_services": [
+                "1810"
+            ],
+            "optional_services": [
+                "180F",
+                "180A"
+            ]
+        }
+    },
+    {
+        "id": "glucose_meter",
+        "name": "Glucose Meter",
+        "icon": "medical_services",
+        "color": "teal",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Blood glucose monitoring device",
+        "detection": {
+            "required_services": [
+                "183A"
+            ],
+            "optional_services": [
+                "180F",
+                "180A"
+            ]
+        }
+    },
+    {
+        "id": "thermometer",
+        "name": "Thermometer",
+        "icon": "device_thermostat",
+        "color": "deepOrange",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Temperature monitoring device",
+        "detection": {
+            "required_services": [
+                "1811"
+            ],
+            "optional_services": [
+                "180F",
+                "180A"
+            ]
+        }
+    },
+    {
+        "id": "pulse_oximeter",
+        "name": "Pulse Oximeter",
+        "icon": "favorite",
+        "color": "red",
+        "category": "fitness",
+        "vendor": "generic",
+        "description": "Blood oxygen level monitoring device",
+        "detection": {
+            "required_services": [
+                "1822"
+            ],
+            "optional_services": [
+                "180F",
+                "180A"
+            ]
+        }
+    },
+    {
+        "id": "wireless_earbuds",
+        "name": "Wireless Earbuds",
+        "icon": "headphones",
+        "color": "deepPurple",
+        "category": "audio",
+        "vendor": "generic",
+        "description": "Wireless audio earbuds",
+        "detection": {
+            "required_services": [
+                "1843"
+            ],
+            "optional_services": [
+                "180F",
+                "1844",
+                "1851",
+                "1852",
+                "1853"
+            ]
+        }
+    },
+    {
+        "id": "bluetooth_headphones",
+        "name": "Bluetooth Headphones",
+        "icon": "headphones",
+        "color": "purple",
+        "category": "audio",
+        "vendor": "generic",
+        "description": "Bluetooth audio headphones",
+        "detection": {
+            "required_services": [
+                "1844"
+            ],
+            "optional_services": [
+                "180F",
+                "1843",
+                "1851",
+                "1852",
+                "1853"
+            ]
+        }
+    },
+    {
+        "id": "bluetooth_speaker",
+        "name": "Bluetooth Speaker",
+        "icon": "speaker",
+        "color": "amber",
+        "category": "audio",
+        "vendor": "generic",
+        "description": "Bluetooth wireless speaker",
+        "detection": {
+            "required_services": [
+                "1851"
+            ],
+            "optional_services": [
+                "1852",
+                "1853",
+                "1843",
+                "1844"
+            ]
+        }
+    },
+    {
+        "id": "soundbar",
+        "name": "Soundbar",
+        "icon": "speaker",
+        "color": "brown",
+        "category": "audio",
+        "vendor": "generic",
+        "description": "Audio soundbar system",
+        "detection": {
+            "required_services": [
+                "1851",
+                "1852"
+            ],
+            "optional_services": [
+                "1853",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smart_tv",
+        "name": "Smart TV",
+        "icon": "tv",
+        "color": "grey",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart television with connectivity",
+        "detection": {
+            "required_services": [
+                "D529"
+            ],
+            "optional_services": [
+                "1872",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smart_display",
+        "name": "Smart Display",
+        "icon": "desktop_windows",
+        "color": "blue",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart display with assistant features",
+        "detection": {
+            "required_services": [
+                "1800"
+            ],
+            "optional_services": [
+                "1801",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smart_lock",
+        "name": "Smart Lock",
+        "icon": "lock",
+        "color": "orange",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart door lock system",
+        "detection": {
+            "required_services": [
+                "1834"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smart_thermostat",
+        "name": "Smart Thermostat",
+        "icon": "device_thermostat",
+        "color": "red",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart climate control thermostat",
+        "detection": {
+            "required_services": [
+                "1831"
+            ],
+            "optional_services": [
+                "1832",
+                "1837",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smart_lighting",
+        "name": "Smart Lighting",
+        "icon": "lightbulb",
+        "color": "yellow",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart lighting control system",
+        "detection": {
+            "required_services": [
+                "1830"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "security_camera",
+        "name": "Security Camera",
+        "icon": "videocam",
+        "color": "blueGrey",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Security monitoring camera",
+        "detection": {
+            "required_services": [
+                "1835"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "smoke_detector",
+        "name": "Smoke Detector",
+        "icon": "smoke_detector",
+        "color": "red",
+        "category": "smart_home",
+        "vendor": "generic",
+        "description": "Smart smoke detection system",
+        "detection": {
+            "required_services": [
+                "1836"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "gaming_controller",
+        "name": "Gaming Controller",
+        "icon": "gamepad",
+        "color": "indigo",
+        "category": "entertainment",
+        "vendor": "generic",
+        "description": "Gaming input controller",
+        "detection": {
+            "required_services": [
+                "1812"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "vr_headset",
+        "name": "VR Headset",
+        "icon": "head_mounted_device",
+        "color": "deepPurple",
+        "category": "entertainment",
+        "vendor": "generic",
+        "description": "Virtual reality headset",
+        "detection": {
+            "required_services": [
+                "1871"
+            ],
+            "optional_services": [
+                "FEB8",
+                "180F",
+                "1849",
+                "184C",
+                "1855"
+            ]
+        }
+    },
+    {
+        "id": "meta_quest",
+        "name": "Meta Quest",
+        "icon": "head_mounted_device",
+        "color": "blue",
+        "category": "entertainment",
+        "vendor": "meta",
+        "description": "Meta Quest VR headset with FEB8 service",
+        "detection": {
+            "required_services": [
+                "FEB8"
+            ],
+            "optional_services": [
+                "1849",
+                "184C",
+                "1855",
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "streaming_device",
+        "name": "Streaming Device",
+        "icon": "cast",
+        "color": "green",
+        "category": "entertainment",
+        "vendor": "generic",
+        "description": "Media streaming device",
+        "detection": {
+            "required_services": [
+                "1872"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "car_system",
+        "name": "Car System",
+        "icon": "directions_car",
+        "color": "blue",
+        "category": "automotive",
+        "vendor": "generic",
+        "description": "Automotive infotainment system",
+        "detection": {
+            "required_services": [
+                "1840"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "tire_pressure_monitor",
+        "name": "Tire Pressure Monitor",
+        "icon": "tire_repair",
+        "color": "orange",
+        "category": "automotive",
+        "vendor": "generic",
+        "description": "Tire pressure monitoring system",
+        "detection": {
+            "required_services": [
+                "1841"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "keyboard",
+        "name": "Keyboard",
+        "icon": "keyboard",
+        "color": "grey",
+        "category": "computing",
+        "vendor": "generic",
+        "description": "Bluetooth input keyboard",
+        "detection": {
+            "required_services": [
+                "1812"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "mouse",
+        "name": "Mouse",
+        "icon": "mouse",
+        "color": "blueGrey",
+        "category": "computing",
+        "vendor": "generic",
+        "description": "Bluetooth input mouse",
+        "detection": {
+            "required_services": [
+                "1812"
+            ],
+            "optional_services": [
+                "180F"
+            ]
+        }
+    },
+    {
+        "id": "tablet",
+        "name": "Tablet",
+        "icon": "tablet",
+        "color": "blue",
+        "category": "computing",
+        "vendor": "generic",
+        "description": "Tablet computing device",
+        "detection": {
+            "required_services": [
+                "1812"
+            ],
+            "optional_services": [
+                "180F",
+                "FED8"
+            ]
+        }
+    },
+    {
+        "id": "generic_device",
+        "name": "Generic Device",
+        "icon": "bluetooth",
+        "color": "grey",
+        "category": "generic",
+        "vendor": "generic",
+        "description": "Generic Bluetooth device with battery",
+        "detection": {
+            "required_services": [
+                "180F"
+            ],
+            "optional_services": [
+                "1800",
+                "1801",
+                "180A"
+            ]
+        }
+    },
+    {
+        "id": "unknown",
+        "name": "Unknown Device",
+        "icon": "device_unknown",
+        "color": "grey",
+        "category": "generic",
+        "vendor": "generic",
+        "description": "Unidentified device type",
+        "detection": {
+            "required_services": [],
+            "optional_services": []
+        }
+    }
+]

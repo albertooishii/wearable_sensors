@@ -1,0 +1,739 @@
+{
+    "services": {
+        "1800": {
+            "name": "Generic Access",
+            "category": "core",
+            "description": "Basic BLE access",
+            "icon": "settings",
+            "color": "grey"
+        },
+        "1801": {
+            "name": "Generic Attribute",
+            "category": "core",
+            "description": "GATT attributes",
+            "icon": "tune",
+            "color": "grey"
+        },
+        "1802": {
+            "name": "Immediate Alert",
+            "category": "alert",
+            "description": "Immediate alerts",
+            "icon": "notification_important",
+            "color": "deepOrange"
+        },
+        "1803": {
+            "name": "Link Loss",
+            "category": "alert",
+            "description": "Connection loss",
+            "icon": "signal_cellular_connected_no_internet_0_bar",
+            "color": "orange"
+        },
+        "1804": {
+            "name": "Tx Power",
+            "category": "core",
+            "description": "Potencia TX",
+            "icon": "signal_cellular_alt",
+            "color": "blue"
+        },
+        "1805": {
+            "name": "Current Time",
+            "category": "time",
+            "description": "Tiempo actual",
+            "icon": "access_time",
+            "color": "blue"
+        },
+        "1806": {
+            "name": "Reference Time Update",
+            "category": "time",
+            "description": "Actualización tiempo",
+            "icon": "update",
+            "color": "blue"
+        },
+        "1807": {
+            "name": "Next DST Change",
+            "category": "time",
+            "description": "Cambio horario",
+            "icon": "schedule",
+            "color": "blue"
+        },
+        "1808": {
+            "name": "Glucose",
+            "category": "health",
+            "description": "Monitor glucosa",
+            "icon": "bloodtype",
+            "color": "red"
+        },
+        "1809": {
+            "name": "Health Thermometer",
+            "category": "health",
+            "description": "Termómetro salud",
+            "icon": "thermostat",
+            "color": "orange"
+        },
+        "180A": {
+            "name": "Device Information",
+            "category": "core",
+            "description": "Info dispositivo",
+            "icon": "info",
+            "color": "purple"
+        },
+        "180D": {
+            "name": "Heart Rate",
+            "category": "health",
+            "description": "Heart rate monitoring",
+            "icon": "favorite",
+            "color": "pink"
+        },
+        "180E": {
+            "name": "Phone Alert Status",
+            "category": "alert",
+            "description": "Estado alerta teléfono",
+            "icon": "phone_android",
+            "color": "orange"
+        },
+        "180F": {
+            "name": "Battery Service",
+            "category": "power",
+            "description": "Estado batería",
+            "icon": "battery_std",
+            "color": "green"
+        },
+        "1810": {
+            "name": "Blood Pressure",
+            "category": "health",
+            "description": "Presión arterial",
+            "icon": "favorite_border",
+            "color": "pink"
+        },
+        "1811": {
+            "name": "Alert Notification",
+            "category": "alert",
+            "description": "Notificaciones",
+            "icon": "notifications",
+            "color": "orange"
+        },
+        "1812": {
+            "name": "Human Interface Device",
+            "category": "hid",
+            "description": "Dispositivo HID",
+            "icon": "keyboard",
+            "color": "brown"
+        },
+        "1813": {
+            "name": "Scan Parameters",
+            "category": "core",
+            "description": "Parámetros scan",
+            "icon": "scanner",
+            "color": "blue"
+        },
+        "1814": {
+            "name": "Running Speed and Cadence",
+            "category": "fitness",
+            "description": "Velocidad carrera",
+            "icon": "directions_run",
+            "color": "blueGrey"
+        },
+        "1815": {
+            "name": "Automation IO",
+            "category": "iot",
+            "description": "Automatización IO",
+            "icon": "settings_input_component",
+            "color": "green"
+        },
+        "1816": {
+            "name": "Cycling Speed and Cadence",
+            "category": "fitness",
+            "description": "Velocidad ciclismo",
+            "icon": "directions_bike",
+            "color": "brown"
+        },
+        "1818": {
+            "name": "Cycling Power",
+            "category": "fitness",
+            "description": "Potencia ciclismo",
+            "icon": "flash_on",
+            "color": "amber"
+        },
+        "1819": {
+            "name": "Location and Navigation",
+            "category": "location",
+            "description": "Navegación GPS",
+            "icon": "navigation",
+            "color": "indigo"
+        },
+        "181A": {
+            "name": "Environmental Sensing",
+            "category": "environment",
+            "description": "Sensores ambientales",
+            "icon": "sensors",
+            "color": "green"
+        },
+        "181B": {
+            "name": "Body Composition",
+            "category": "health",
+            "description": "Composición corporal",
+            "icon": "accessibility",
+            "color": "teal"
+        },
+        "181C": {
+            "name": "User Data",
+            "category": "core",
+            "description": "Datos usuario",
+            "icon": "person",
+            "color": "blue"
+        },
+        "181D": {
+            "name": "Weight Scale",
+            "category": "health",
+            "description": "Báscula peso",
+            "icon": "monitor_weight",
+            "color": "deepPurple"
+        },
+        "181E": {
+            "name": "Bond Management",
+            "category": "core",
+            "description": "Gestión vínculos",
+            "icon": "link",
+            "color": "blue"
+        },
+        "181F": {
+            "name": "Continuous Glucose Monitoring",
+            "category": "health",
+            "description": "Monitor glucosa continua",
+            "icon": "monitor_heart",
+            "color": "red"
+        },
+        "1820": {
+            "name": "Internet Protocol Support",
+            "category": "network",
+            "description": "Soporte IP",
+            "icon": "language",
+            "color": "blue"
+        },
+        "1821": {
+            "name": "Indoor Positioning",
+            "category": "location",
+            "description": "Posición interior",
+            "icon": "location_on",
+            "color": "brown"
+        },
+        "1822": {
+            "name": "Pulse Oximeter",
+            "category": "health",
+            "description": "Oxígeno sangre",
+            "icon": "bloodtype",
+            "color": "red"
+        },
+        "1823": {
+            "name": "HTTP Proxy",
+            "category": "network",
+            "description": "Proxy HTTP",
+            "icon": "public",
+            "color": "indigo"
+        },
+        "1824": {
+            "name": "Transport Discovery",
+            "category": "network",
+            "description": "Descubrimiento",
+            "icon": "search",
+            "color": "purple"
+        },
+        "1825": {
+            "name": "Object Transfer",
+            "category": "data",
+            "description": "Transferencia",
+            "icon": "swap_horiz",
+            "color": "cyan"
+        },
+        "1826": {
+            "name": "Fitness Machine",
+            "category": "fitness",
+            "description": "Máquina fitness",
+            "icon": "fitness_center",
+            "color": "lightGreen"
+        },
+        "1827": {
+            "name": "Mesh Provisioning",
+            "category": "mesh",
+            "description": "Mesh red",
+            "icon": "grid_on",
+            "color": "deepPurple"
+        },
+        "1828": {
+            "name": "Mesh Proxy",
+            "category": "mesh",
+            "description": "Proxy mesh",
+            "icon": "device_hub",
+            "color": "deepPurple"
+        },
+        "1829": {
+            "name": "Reconnection Configuration",
+            "category": "core",
+            "description": "Reconexión",
+            "icon": "sync",
+            "color": "blueGrey"
+        },
+        "182A": {
+            "name": "Generic Telephony",
+            "category": "audio",
+            "description": "Telefonía genérica",
+            "icon": "phone",
+            "color": "green"
+        },
+        "182B": {
+            "name": "Media Control Service",
+            "category": "media",
+            "description": "Control medios",
+            "icon": "media_bluetooth_on",
+            "color": "indigo"
+        },
+        "182C": {
+            "name": "Generic Media Control Service",
+            "category": "media",
+            "description": "Control genérico",
+            "icon": "control_camera",
+            "color": "blueGrey"
+        },
+        "182D": {
+            "name": "Constant Tone Extension",
+            "category": "audio",
+            "description": "Extensión tono",
+            "icon": "tune",
+            "color": "brown"
+        },
+        "182E": {
+            "name": "Telephone Bearer Service",
+            "category": "audio",
+            "description": "Portador teléfono",
+            "icon": "phone",
+            "color": "green"
+        },
+        "182F": {
+            "name": "Generic Telephone Bearer Service",
+            "category": "audio",
+            "description": "Portador genérico",
+            "icon": "call",
+            "color": "blue"
+        },
+        "1843": {
+            "name": "Audio Input Control",
+            "category": "audio",
+            "description": "Control audio entrada",
+            "icon": "mic",
+            "color": "cyan"
+        },
+        "1844": {
+            "name": "Volume Control",
+            "category": "audio",
+            "description": "Control volumen",
+            "icon": "volume_up",
+            "color": "cyan"
+        },
+        "1845": {
+            "name": "Volume Offset Control",
+            "category": "audio",
+            "description": "Offset volumen",
+            "icon": "volume_mute",
+            "color": "grey"
+        },
+        "1846": {
+            "name": "Coordinated Set Identification",
+            "category": "audio",
+            "description": "ID conjunto coordinado",
+            "icon": "group",
+            "color": "blue"
+        },
+        "1847": {
+            "name": "Device Time",
+            "category": "time",
+            "description": "Tiempo dispositivo",
+            "icon": "watch_later",
+            "color": "blue"
+        },
+        "1848": {
+            "name": "Media Control Service",
+            "category": "media",
+            "description": "Servicio control medios",
+            "icon": "audiotrack",
+            "color": "purple"
+        },
+        "1849": {
+            "name": "Generic Media Control Service",
+            "category": "media",
+            "description": "Control medios genérico",
+            "icon": "queue_music",
+            "color": "indigo"
+        },
+        "184A": {
+            "name": "Microphone Control",
+            "category": "audio",
+            "description": "Control micrófono",
+            "icon": "mic",
+            "color": "red"
+        },
+        "184B": {
+            "name": "Audio Stream Control",
+            "category": "audio",
+            "description": "Control stream audio",
+            "icon": "audio_file",
+            "color": "cyan"
+        },
+        "184C": {
+            "name": "Broadcast Audio Announcement",
+            "category": "audio",
+            "description": "Anuncio audio broadcast",
+            "icon": "broadcast_on_personal",
+            "color": "orange"
+        },
+        "184D": {
+            "name": "Common Audio Service",
+            "category": "audio",
+            "description": "Servicio audio común",
+            "icon": "audiotrack",
+            "color": "purple"
+        },
+        "184E": {
+            "name": "Hearing Access Service",
+            "category": "accessibility",
+            "description": "Servicio acceso auditivo",
+            "icon": "hearing",
+            "color": "deepPurple"
+        },
+        "184F": {
+            "name": "Telephony and Media Audio",
+            "category": "audio",
+            "description": "Audio telefonía y medios",
+            "icon": "phone_in_talk",
+            "color": "green"
+        },
+        "1850": {
+            "name": "Public Broadcast Announcement",
+            "category": "media",
+            "description": "Anuncio broadcast público",
+            "icon": "campaign",
+            "color": "orange"
+        },
+        "1851": {
+            "name": "Electronic Shelf Label",
+            "category": "iot",
+            "description": "Etiqueta electrónica",
+            "icon": "label",
+            "color": "brown"
+        },
+        "1852": {
+            "name": "Gaming Audio",
+            "category": "gaming",
+            "description": "Audio gaming",
+            "icon": "sports_esports",
+            "color": "purple"
+        },
+        "1854": {
+            "name": "Mesh Proxy Solicitation",
+            "category": "mesh",
+            "description": "Solicitud proxy mesh",
+            "icon": "network_node",
+            "color": "deepPurple"
+        },
+        "1855": {
+            "name": "Audio Streaming Service",
+            "category": "audio",
+            "description": "Streaming audio (Quest 3)",
+            "icon": "stream",
+            "color": "purple"
+        },
+        "FE26": {
+            "name": "Google Service",
+            "category": "vendor",
+            "description": "Servicio Google",
+            "icon": "g_mobiledata",
+            "color": "blue"
+        },
+        "FE2A": {
+            "name": "Microsoft Service",
+            "category": "vendor",
+            "description": "Servicio Microsoft",
+            "icon": "computer",
+            "color": "blue"
+        },
+        "FE59": {
+            "name": "Nordic Semiconductor ASA",
+            "category": "vendor",
+            "description": "Nordic service",
+            "icon": "memory",
+            "color": "blue"
+        },
+        "FE6F": {
+            "name": "Apple Media Service",
+            "category": "vendor",
+            "description": "Media Apple",
+            "icon": "music_note",
+            "color": "blue"
+        },
+        "FE84": {
+            "name": "HTC Corporation",
+            "category": "vendor",
+            "description": "HTC service",
+            "icon": "smartphone",
+            "color": "green"
+        },
+        "FE95": {
+            "name": "Xiaomi Inc",
+            "category": "vendor",
+            "description": "Xiaomi Inc",
+            "icon": "watch_later",
+            "color": "deepOrange"
+        },
+        "FDAB": {
+            "name": "Xiaomi Proprietary Service",
+            "category": "vendor",
+            "description": "Servicio propietario Xiaomi",
+            "icon": "tune",
+            "color": "orange"
+        },
+        "0001": {
+            "name": "Generic Service",
+            "category": "custom",
+            "description": "Servicio genérico",
+            "icon": "settings",
+            "color": "grey"
+        },
+        "FE9F": {
+            "name": "Google LLC",
+            "category": "vendor",
+            "description": "Google LLC",
+            "icon": "g_mobiledata",
+            "color": "red"
+        },
+        "FEAA": {
+            "name": "Fitbit Service",
+            "category": "vendor",
+            "description": "Servicio Fitbit",
+            "icon": "fitness_center",
+            "color": "green"
+        },
+        "FEC6": {
+            "name": "Garmin Service",
+            "category": "vendor",
+            "description": "Servicio Garmin",
+            "icon": "fitness_center",
+            "color": "red"
+        },
+        "FEDC": {
+            "name": "Tile Inc",
+            "category": "vendor",
+            "description": "Tile tracker",
+            "icon": "location_searching",
+            "color": "teal"
+        },
+        "FED8": {
+            "name": "Samsung Service",
+            "category": "vendor",
+            "description": "Servicio Samsung",
+            "icon": "smartphone",
+            "color": "blue"
+        },
+        "FEE0": {
+            "name": "Xiaomi Service",
+            "category": "vendor",
+            "description": "Servicio Xiaomi",
+            "icon": "watch",
+            "color": "orange"
+        },
+        "FEE1": {
+            "name": "Xiaomi Health",
+            "category": "vendor",
+            "description": "Salud Xiaomi",
+            "icon": "health_and_safety",
+            "color": "green"
+        },
+        "FEE7": {
+            "name": "Apple Service",
+            "category": "vendor",
+            "description": "Servicio Apple",
+            "icon": "phone_iphone",
+            "color": "blue"
+        },
+        "FEE9": {
+            "name": "Apple Continuity",
+            "category": "vendor",
+            "description": "Continuidad Apple",
+            "icon": "sync_alt",
+            "color": "blue"
+        },
+        "FFF0": {
+            "name": "Nordic UART",
+            "category": "custom",
+            "description": "UART Nordic",
+            "icon": "terminal",
+            "color": "blueGrey"
+        },
+        "FFF1": {
+            "name": "Custom Data Service",
+            "category": "custom",
+            "description": "Datos personalizados",
+            "icon": "data_usage",
+            "color": "grey"
+        },
+        "FFF2": {
+            "name": "Configuration Service",
+            "category": "custom",
+            "description": "Configuración",
+            "icon": "settings_applications",
+            "color": "blueGrey"
+        },
+        "FFF3": {
+            "name": "Firmware Update",
+            "category": "custom",
+            "description": "Actualización FW",
+            "icon": "system_update",
+            "color": "orange"
+        },
+        "1830": {
+            "name": "Smart Lighting",
+            "category": "iot",
+            "description": "Control iluminación",
+            "icon": "lightbulb",
+            "color": "amber"
+        },
+        "1831": {
+            "name": "Temperature Sensor",
+            "category": "environment",
+            "description": "Sensor temperatura",
+            "icon": "thermostat",
+            "color": "orange"
+        },
+        "1832": {
+            "name": "Humidity Sensor",
+            "category": "environment",
+            "description": "Sensor humedad",
+            "icon": "water_drop",
+            "color": "blue"
+        },
+        "1833": {
+            "name": "Motion Sensor",
+            "category": "iot",
+            "description": "Sensor movimiento",
+            "icon": "motion_photos_on",
+            "color": "red"
+        },
+        "1834": {
+            "name": "Door Lock",
+            "category": "iot",
+            "description": "Cerradura inteligente",
+            "icon": "lock_open",
+            "color": "brown"
+        },
+        "1835": {
+            "name": "Security Camera",
+            "category": "iot",
+            "description": "Cámara seguridad",
+            "icon": "videocam",
+            "color": "blueGrey"
+        },
+        "1836": {
+            "name": "Smoke Detector",
+            "category": "iot",
+            "description": "Detector humo",
+            "icon": "smoke_free",
+            "color": "red"
+        },
+        "1837": {
+            "name": "Air Quality Monitor",
+            "category": "environment",
+            "description": "Calidad aire",
+            "icon": "air",
+            "color": "green"
+        },
+        "1840": {
+            "name": "Vehicle Control",
+            "category": "automotive",
+            "description": "Control vehículo",
+            "icon": "directions_car",
+            "color": "blue"
+        },
+        "1841": {
+            "name": "Tire Pressure",
+            "category": "automotive",
+            "description": "Presión neumáticos",
+            "icon": "tire_repair",
+            "color": "orange"
+        },
+        "1842": {
+            "name": "Engine Diagnostics",
+            "category": "automotive",
+            "description": "Diagnóstico motor",
+            "icon": "build",
+            "color": "red"
+        },
+        "1860": {
+            "name": "Asset Tracking",
+            "category": "iot",
+            "description": "Rastreo activos",
+            "icon": "local_shipping",
+            "color": "brown"
+        },
+        "1861": {
+            "name": "Environmental Monitor",
+            "category": "environment",
+            "description": "Monitor ambiental",
+            "icon": "eco",
+            "color": "green"
+        },
+        "1862": {
+            "name": "Safety Equipment",
+            "category": "iot",
+            "description": "Equipo seguridad",
+            "icon": "health_and_safety",
+            "color": "orange"
+        },
+        "1870": {
+            "name": "Game Controller Extended",
+            "category": "gaming",
+            "description": "Control gaming",
+            "icon": "sports_esports",
+            "color": "purple"
+        },
+        "1871": {
+            "name": "VR Accessory",
+            "category": "gaming",
+            "description": "Accesorio VR",
+            "icon": "vrpano",
+            "color": "deepPurple"
+        },
+        "1872": {
+            "name": "Streaming Device",
+            "category": "media",
+            "description": "Dispositivo streaming",
+            "icon": "cast_connected",
+            "color": "green"
+        },
+        "A000": {
+            "name": "Custom IoT",
+            "category": "custom",
+            "description": "Dispositivo IoT",
+            "icon": "hub",
+            "color": "grey"
+        },
+        "FEB8": {
+            "name": "Meta Quest Service",
+            "category": "gaming",
+            "description": "Meta Quest VR (Facebook)",
+            "icon": "vrpano",
+            "color": "blue"
+        },
+        "D529": {
+            "name": "Samsung Tizen Service",
+            "category": "vendor",
+            "description": "Samsung Tizen RT",
+            "icon": "tv",
+            "color": "darkBlue"
+        },
+        "6E400001": {
+            "name": "Nordic UART Service",
+            "category": "custom",
+            "description": "UART avanzado",
+            "icon": "settings_ethernet",
+            "color": "blueGrey"
+        }
+    }
+}

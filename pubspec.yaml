@@ -1,0 +1,45 @@
+name: wearable_sensors
+description: Bluetooth LE & Classic wearable device integration package for Flutter
+version: 0.0.1
+homepage: https://github.com/albertooishii/wearable_sensors
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Bluetooth
+  flutter_blue_plus: ^2.0.0
+  flutter_blue_classic: ^0.0.7
+  
+  # Protobuf
+  protobuf: ^5.0.0
+  fixnum: ^1.1.1
+  
+  # Crypto
+  pointycastle: ^4.0.0
+  convert: ^3.1.1
+  
+  # Utils
+  path_provider: ^2.1.5
+  shared_preferences: ^2.3.3
+  
+  # Permissions & Security
+  permission_handler: ^12.0.1
+  flutter_secure_storage: ^9.2.2
+  device_info_plus: ^12.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  mockito: ^5.4.4
+
+flutter:
+  assets:
+    - assets/data/
+    - assets/device_implementations/
+    - assets/proto/
