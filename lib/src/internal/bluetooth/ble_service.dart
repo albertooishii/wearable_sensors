@@ -1916,7 +1916,6 @@ class BleService {
       // 1. Obtener dispositivo actualizado (evitar cache stale)
       debugPrint('   📡 Getting fresh device instance...');
       final bleDevice = await getBluetoothDeviceAsync(deviceId);
-
       debugPrint(
         '   ✅ Got device: ${bleDevice.platformName} (${bleDevice.remoteId.str})',
       );
@@ -1925,7 +1924,7 @@ class BleService {
       if (!bleDevice.isConnected) {
         debugPrint('   📶 Connecting to device...');
         await bleDevice.connect(
-          mtu: requestMtu, // MTU optimizado para SPP packets
+          mtu: requestMtu,
           timeout: timeout,
           license: fbp.License.free,
         );
@@ -1934,26 +1933,9 @@ class BleService {
         debugPrint('   ✅ Device already connected');
       }
 
-      // 3. Esperar estabilización de la conexión
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // 4. Descubrir servicios para refrescar estado del dispositivo
-      debugPrint('   🔍 Discovering services...');
-      final services = await bleDevice.discoverServices();
-      debugPrint('   📋 Discovered ${services.length} services');
-
-      // 5. Leer información básica del dispositivo
-      try {
-        final rssi = await bleDevice.readRssi();
-        debugPrint('   📶 Current RSSI: $rssi dBm');
-      } on Exception catch (e) {
-        debugPrint('   ⚠️ Could not read RSSI: $e');
-      }
-
-      // 6. Validar estado de conexión
-      if (!bleDevice.isConnected) {
-        throw Exception('Device disconnected unexpectedly after setup');
-      }
+      // 3. Setup y validación
+      await _setupMtuAndDiscoverServices(bleDevice);
+      await _validateTemporaryConnection(bleDevice);
 
       debugPrint('   ✅ Temporary connection established successfully');
       debugPrint('   📊 Device state: connected=${bleDevice.isConnected}');
@@ -2137,6 +2119,36 @@ class BleService {
     } catch (e) {
       debugPrint('❌ Authentication exception: $e');
       return ConnectionResult.failure(deviceId, 'Authentication failed: $e');
+    }
+  }
+
+  /// Métodos privados para setup y validación de conexiones
+
+  /// Configurar MTU y descubrir servicios del dispositivo
+  Future<void> _setupMtuAndDiscoverServices(
+      fbp.BluetoothDevice bleDevice) async {
+    // Esperar estabilización de la conexión
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Descubrir servicios para refrescar estado del dispositivo
+    debugPrint('   🔍 Discovering services...');
+    final services = await bleDevice.discoverServices();
+    debugPrint('   📋 Discovered ${services.length} services');
+
+    // Leer información básica del dispositivo
+    try {
+      final rssi = await bleDevice.readRssi();
+      debugPrint('   📶 Current RSSI: $rssi dBm');
+    } on Exception catch (e) {
+      debugPrint('   ⚠️ Could not read RSSI: $e');
+    }
+  }
+
+  /// Validar que la conexión temporal está establecida correctamente
+  Future<void> _validateTemporaryConnection(
+      fbp.BluetoothDevice bleDevice) async {
+    if (!bleDevice.isConnected) {
+      throw Exception('Device disconnected unexpectedly after setup');
     }
   }
 }
