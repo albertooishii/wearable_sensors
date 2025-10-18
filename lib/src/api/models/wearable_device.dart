@@ -12,6 +12,8 @@
 
 import '../enums/connection_state.dart';
 import '../exceptions/connection_exception.dart';
+import '../ble_services_catalog.dart';
+import 'ble_service_info.dart';
 import 'device_types_loader.dart' as loader;
 
 /// Unified device state for UI
@@ -40,9 +42,19 @@ class WearableDevice {
       connectedAt: json['connectedAt'] != null
           ? DateTime.parse(json['connectedAt'] as String)
           : null,
-      discoveredServices:
-          (json['discoveredServices'] as List<dynamic>?)?.cast<String>() ??
-              const [],
+      discoveredServices: (json['discoveredServices'] as List<dynamic>?)
+              ?.map((final s) {
+                if (s is Map<String, dynamic>) {
+                  return BleServiceInfo.fromJson(
+                    s['uuid'] as String,
+                    s,
+                  );
+                }
+                return null;
+              })
+              .whereType<BleServiceInfo>()
+              .toList() ??
+          const [],
       isSavedDevice: json['isSavedDevice'] as bool? ?? false,
       isPairedToSystem: json['isPairedToSystem'] as bool? ?? false,
       rssi: json['rssi'] as int?,
@@ -75,7 +87,8 @@ class WearableDevice {
   final DateTime? lastDataTimestamp; // Last time biometric data received
   final DateTime? lastSeen;
   final DateTime? connectedAt;
-  final List<String> discoveredServices;
+  final List<BleServiceInfo>
+      discoveredServices; // ✅ CAMBIO: BleService objects en lugar de strings
   final bool isSavedDevice;
   final bool isPairedToSystem;
   final int? rssi; // Signal strength
@@ -129,7 +142,7 @@ class WearableDevice {
     final DateTime? lastDataTimestamp,
     final DateTime? lastSeen,
     final DateTime? connectedAt,
-    final List<String>? discoveredServices,
+    final List<BleServiceInfo>? discoveredServices, // ✅ CAMBIO: BleService list
     final bool? isSavedDevice,
     final bool? isPairedToSystem,
     final int? rssi,
@@ -165,7 +178,7 @@ class WearableDevice {
       'lastDataTimestamp': lastDataTimestamp?.toIso8601String(),
       'lastSeen': lastSeen?.toIso8601String(),
       'connectedAt': connectedAt?.toIso8601String(),
-      'discoveredServices': discoveredServices,
+      'discoveredServices': discoveredServices.map((s) => s.toJson()).toList(),
       'isSavedDevice': isSavedDevice,
       'isPairedToSystem': isPairedToSystem,
       'rssi': rssi,
@@ -173,10 +186,15 @@ class WearableDevice {
   }
 
   /// Create from BluetoothDevice (scanned device)
+  ///
+  /// Note: En el escaneo inicial, los servicios vienen como UUIDs (strings).
+  /// Para convertirlos a BleService objects, use `enrichServicesFromUuids()`.
+  ///
+  /// Este constructor crea un device con servicios vacíos, que se rellenan
+  /// después mediante el método estático `enrichServicesFromUuids()`.
   static WearableDevice fromBluetoothDevice(
     final String deviceId,
-    final String name,
-    final List<String> services, {
+    final String name, {
     final String? deviceTypeId,
     final int? rssi,
     final bool isPaired = false,
@@ -187,10 +205,43 @@ class WearableDevice {
       deviceTypeId: deviceTypeId ?? 'unknown',
       macAddress: deviceId,
       connectionState: ConnectionState.disconnected,
-      discoveredServices: services,
+      discoveredServices: const [], // ✅ Vacío inicialmente
       rssi: rssi,
       isPairedToSystem: isPaired,
     );
+  }
+
+  /// Enriquecer servicios desde lista de UUID strings
+  ///
+  /// Este método carga los BleService objects desde UUIDs.
+  /// Se llama después de `fromBluetoothDevice()` para llenar los servicios.
+  static Future<WearableDevice> enrichServicesFromUuids(
+    final WearableDevice device,
+    final List<String> serviceUuids,
+  ) async {
+    final enrichedServices = <BleServiceInfo>[];
+
+    for (final uuid in serviceUuids) {
+      final service = await BleServicesCatalog.getService(uuid);
+      if (service != null) {
+        enrichedServices.add(service);
+      } else {
+        // Crear un BleService "unknown" para UUIDs no reconocidos
+        enrichedServices.add(
+          BleServiceInfo(
+            uuid: uuid,
+            name: 'Unknown Service',
+            description: 'Unknown service UUID',
+            category: 'generic',
+            iconName: 'help',
+            colorName: 'grey',
+            isGeneric: true,
+          ),
+        );
+      }
+    }
+
+    return device.copyWith(discoveredServices: enrichedServices);
   }
 
   /// Load device type metadata from DeviceTypesLoader

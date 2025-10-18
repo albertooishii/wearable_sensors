@@ -427,7 +427,7 @@ class DeviceConnectionManager {
           macAddress: btDevice.deviceId,
           connectionState: ConnectionState.disconnected,
           isPairedToSystem: true,
-          discoveredServices: btDevice.services,
+          discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
         );
       }).toList();
     } catch (e) {
@@ -506,10 +506,8 @@ class DeviceConnectionManager {
   /// Returns first 3 octets in uppercase (e.g., "00:22:4F" or "00224F")
   String? _extractOui(String macAddress) {
     // Handle both formats: "00:22:4F:XX:XX:XX" and "00224FxxxxXX"
-    final cleanMac = macAddress
-        .replaceAll(':', '')
-        .replaceAll('-', '')
-        .toUpperCase();
+    final cleanMac =
+        macAddress.replaceAll(':', '').replaceAll('-', '').toUpperCase();
 
     if (cleanMac.length >= 6) {
       return cleanMac.substring(0, 6);
@@ -667,7 +665,7 @@ class DeviceConnectionManager {
           macAddress: btDevice.deviceId,
           connectionState: ConnectionState.disconnected,
           isPairedToSystem: true,
-          discoveredServices: btDevice.services,
+          discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
         );
 
         _deviceStates[btDevice.deviceId] = deviceState;

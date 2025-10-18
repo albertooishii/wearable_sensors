@@ -49,7 +49,7 @@ class DeviceAdapter {
       lastDataTimestamp: null,
       lastSeen: DateTime.now(),
       connectedAt: null,
-      discoveredServices: internal.services,
+      discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
       isSavedDevice: isSavedDevice ?? false,
       isPairedToSystem: internal.paired,
       rssi: internal.rssi,

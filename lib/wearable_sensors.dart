@@ -47,11 +47,17 @@ export 'src/api/enums/sensor_type.dart';
 // PUBLIC MODELS
 // ============================================================
 export 'src/api/models/auth_credentials.dart';
+export 'src/api/models/ble_service_info.dart'; // ✅ NUEVO: BleServiceInfo model (agnóstico)
 export 'src/api/models/bluetooth_status.dart';
 export 'src/api/models/device_capabilities.dart';
 export 'src/api/models/device_types_loader.dart';
 export 'src/api/models/sensor_reading.dart';
 export 'src/api/models/wearable_device.dart';
+
+// ============================================================
+// PUBLIC SERVICES
+// ============================================================
+export 'src/api/ble_services_catalog.dart'; // ✅ NUEVO: BleServicesCatalog
 
 // ============================================================
 // PUBLIC EXCEPTIONS
