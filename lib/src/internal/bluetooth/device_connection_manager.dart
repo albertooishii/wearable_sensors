@@ -472,13 +472,111 @@ class DeviceConnectionManager {
   /// 2. Parse deviceId format (MAC address patterns)
   /// 3. Fallback to generic
   Future<DeviceVendor> _detectVendor(final String deviceId) async {
-    // TODO: Implement proper vendor detection
-    // For now, assume all devices are Xiaomi
-    // In production:
-    // - Check saved metadata (SharedPreferences)
-    // - Parse MAC address OUI (first 3 bytes)
-    // - Query device for manufacturer info
-    return DeviceVendor.xiaomi;
+    // Step 1: Check saved metadata in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final savedVendor = prefs.getString('device_vendor_$deviceId');
+    if (savedVendor != null) {
+      debugPrint('   📦 Vendor from cache: $savedVendor');
+      return _vendorFromString(savedVendor);
+    }
+
+    // Step 2: Try to detect from MAC address OUI (first 3 bytes)
+    // MAC format: "XX:XX:XX:XX:XX:XX" or "XXXXXXXXXXXX"
+    try {
+      final oui = _extractOui(deviceId);
+      if (oui != null) {
+        final vendor = _vendorFromOui(oui);
+        if (vendor != DeviceVendor.unknown) {
+          debugPrint('   🏷️  Vendor from OUI: $oui → $vendor');
+          // Save for future use
+          await prefs.setString('device_vendor_$deviceId', vendor.toString());
+          return vendor;
+        }
+      }
+    } catch (e) {
+      debugPrint('   ⚠️  MAC OUI detection failed: $e');
+    }
+
+    // Fallback: Default to generic (no assumption about Xiaomi)
+    debugPrint('   ❓ Vendor unknown, using generic');
+    return DeviceVendor.generic;
+  }
+
+  /// Extract OUI (Organizationally Unique Identifier) from MAC address
+  /// Returns first 3 octets in uppercase (e.g., "00:22:4F" or "00224F")
+  String? _extractOui(String macAddress) {
+    // Handle both formats: "00:22:4F:XX:XX:XX" and "00224FxxxxXX"
+    final cleanMac = macAddress
+        .replaceAll(':', '')
+        .replaceAll('-', '')
+        .toUpperCase();
+
+    if (cleanMac.length >= 6) {
+      return cleanMac.substring(0, 6);
+    }
+
+    return null;
+  }
+
+  /// Detect vendor from MAC address OUI (first 3 bytes)
+  /// References:
+  /// - https://standards.ieee.org/develop/regauth/oui/
+  /// - Common wearable vendor OUIs
+  DeviceVendor _vendorFromOui(String oui) {
+    // Xiaomi Mi Band OUI list (non-exhaustive)
+    const xiaomiOuis = {
+      '00224F', // Early Mi Band models
+      '34CE00', // Mi Band 3/4/5/6
+      'EC39F5', // Mi Band 6/7
+      '5856FF', // Mi Band 8
+      '98EF05', // Mi Band variants
+      'B4B59D', // Mi Band regional variants
+    };
+
+    if (xiaomiOuis.contains(oui)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Apple Watch / AirPods OUI
+    const appleOuis = {
+      '001A86',
+      '001F5B',
+      '0019B5',
+      '00156D',
+    };
+
+    if (appleOuis.contains(oui)) {
+      return DeviceVendor.apple;
+    }
+
+    // Fitbit OUI
+    const fitbitOuis = {
+      '000704',
+      '9CC3B0',
+      '9CA5DE',
+    };
+
+    if (fitbitOuis.contains(oui)) {
+      return DeviceVendor.fitbit;
+    }
+
+    return DeviceVendor.unknown;
+  }
+
+  /// Convert string back to DeviceVendor enum (for SharedPreferences)
+  DeviceVendor _vendorFromString(String vendor) {
+    switch (vendor) {
+      case 'DeviceVendor.xiaomi':
+        return DeviceVendor.xiaomi;
+      case 'DeviceVendor.fitbit':
+        return DeviceVendor.fitbit;
+      case 'DeviceVendor.apple':
+        return DeviceVendor.apple;
+      case 'DeviceVendor.generic':
+        return DeviceVendor.generic;
+      default:
+        return DeviceVendor.unknown;
+    }
   }
 
   /// Create orchestrator for a specific vendor
