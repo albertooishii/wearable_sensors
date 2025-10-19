@@ -888,83 +888,111 @@ class BleService {
       );
       debugPrint('🐛 DEBUG: Characteristic obtained successfully');
 
-      // Habilitar/deshabilitar notificaciones
+      // 🔧 REFACTORIZADO: Usar helpers específicos para enable/disable
       if (enable) {
-        debugPrint('🐛 DEBUG: Calling characteristic.setNotifyValue(true)...');
-        await characteristic.setNotifyValue(true);
-        debugPrint('🐛 DEBUG: Subscribe completed');
-
-        debugPrint(
-          '🐛 DEBUG: Setting up onValueReceived listener for $characteristicUuid...',
+        await _enableNotifications(
+          deviceId: deviceId,
+          bleDevice: bleDevice,
+          characteristic: characteristic,
+          characteristicUuid: characteristicUuid,
         );
-
-        // ✅ CRITICAL FIX: Cancel previous subscription if exists (prevent duplicates)
-        final subscriptionKey = '$deviceId:$characteristicUuid';
-        if (_characteristicSubscriptions.containsKey(subscriptionKey)) {
-          debugPrint('🧹 Canceling previous subscription for $subscriptionKey');
-          await _characteristicSubscriptions[subscriptionKey]?.cancel();
-          _characteristicSubscriptions.remove(subscriptionKey);
-        }
-
-        // ✅ Mejor práctica: Auto-cleanup cuando hay error o disconnect
-        final subscription = characteristic.onValueReceived.listen(
-          (final value) {
-            // 🔴 TEST #13: LOG COMPLETAMENTE RAW - SIN FILTROS
-            debugPrint(
-              '🐛 DEBUG: [$characteristicUuid] RAW notification! Length: ${value.length}, Bytes: ${value.toList()}',
-            );
-
-            // 🆕 EMIT to rawBleDataStream for upper services to consume
-            final bleDataPacket = BleDataPacket(
-              deviceId: deviceId,
-              serviceUuid: serviceUuid,
-              characteristicUuid: characteristicUuid,
-              rawData: value.toList(),
-              timestamp: DateTime.now(),
-            );
-            _rawBleDataController.add(bleDataPacket);
-          },
-          onError: (final error, final stackTrace) {
-            // 🔴 TEST #13: LOG EXPLÍCITO DE ERRORES
-            debugPrint(
-              '🐛 DEBUG: [$characteristicUuid] Listener ERROR: $error',
-            );
-          },
-          onDone: () {
-            // 🔴 TEST #13: LOG CUANDO LISTENER SE CIERRA
-            debugPrint('🐛 DEBUG: [$characteristicUuid] Listener DONE');
-            _characteristicSubscriptions.remove(subscriptionKey); // Cleanup
-          },
-          cancelOnError:
-              false, // 🔴 TEST #13: NO CANCELAR EN ERROR - ver si hay errores silenciosos
-        );
-
-        // ✅ Store subscription for later cleanup
-        _characteristicSubscriptions[subscriptionKey] = subscription;
-
-        // ✅ Auto-cleanup cuando el dispositivo se desconecta
-        bleDevice.cancelWhenDisconnected(subscription);
-
-        debugPrint('✅ Notifications enabled for $characteristicUuid');
       } else {
-        // Disable notifications - also cleanup subscription
-        await characteristic.setNotifyValue(false);
-
-        final subscriptionKey = '$deviceId:$characteristicUuid';
-        if (_characteristicSubscriptions.containsKey(subscriptionKey)) {
-          debugPrint(
-            '🧹 Canceling subscription for $subscriptionKey (disable)',
-          );
-          await _characteristicSubscriptions[subscriptionKey]?.cancel();
-          _characteristicSubscriptions.remove(subscriptionKey);
-        }
-
-        debugPrint('✅ Notifications disabled for $characteristicUuid');
+        await _disableNotifications(
+          deviceId: deviceId,
+          characteristic: characteristic,
+          characteristicUuid: characteristicUuid,
+        );
       }
     } on Exception catch (e) {
       debugPrint('❌ Error setting notifiable: $e');
       rethrow;
     }
+  }
+
+  /// 🔧 HELPER: Habilitar notificaciones en una característica
+  Future<void> _enableNotifications({
+    required final String deviceId,
+    required final fbp.BluetoothDevice bleDevice,
+    required final fbp.BluetoothCharacteristic characteristic,
+    required final String characteristicUuid,
+  }) async {
+    debugPrint('🐛 DEBUG: Calling characteristic.setNotifyValue(true)...');
+    await characteristic.setNotifyValue(true);
+    debugPrint('🐛 DEBUG: Subscribe completed');
+
+    debugPrint(
+      '🐛 DEBUG: Setting up onValueReceived listener for $characteristicUuid...',
+    );
+
+    // ✅ CRITICAL FIX: Cancel previous subscription if exists (prevent duplicates)
+    final subscriptionKey = '$deviceId:$characteristicUuid';
+    if (_characteristicSubscriptions.containsKey(subscriptionKey)) {
+      debugPrint('🧹 Canceling previous subscription for $subscriptionKey');
+      await _characteristicSubscriptions[subscriptionKey]?.cancel();
+      _characteristicSubscriptions.remove(subscriptionKey);
+    }
+
+    // ✅ Mejor práctica: Auto-cleanup cuando hay error o disconnect
+    final subscription = characteristic.onValueReceived.listen(
+      (final value) {
+        // 🔴 TEST #13: LOG COMPLETAMENTE RAW - SIN FILTROS
+        debugPrint(
+          '🐛 DEBUG: [$characteristicUuid] RAW notification! Length: ${value.length}, Bytes: ${value.toList()}',
+        );
+
+        // 🆕 EMIT to rawBleDataStream for upper services to consume
+        final bleDataPacket = BleDataPacket(
+          deviceId: deviceId,
+          serviceUuid: '',
+          characteristicUuid: characteristicUuid,
+          rawData: value.toList(),
+          timestamp: DateTime.now(),
+        );
+        _rawBleDataController.add(bleDataPacket);
+      },
+      onError: (final error, final stackTrace) {
+        // 🔴 TEST #13: LOG EXPLÍCITO DE ERRORES
+        debugPrint(
+          '🐛 DEBUG: [$characteristicUuid] Listener ERROR: $error',
+        );
+      },
+      onDone: () {
+        // 🔴 TEST #13: LOG CUANDO LISTENER SE CIERRA
+        debugPrint('🐛 DEBUG: [$characteristicUuid] Listener DONE');
+        _characteristicSubscriptions.remove(subscriptionKey); // Cleanup
+      },
+      cancelOnError:
+          false, // 🔴 TEST #13: NO CANCELAR EN ERROR - ver si hay errores silenciosos
+    );
+
+    // ✅ Store subscription for later cleanup
+    _characteristicSubscriptions[subscriptionKey] = subscription;
+
+    // ✅ Auto-cleanup cuando el dispositivo se desconecta
+    bleDevice.cancelWhenDisconnected(subscription);
+
+    debugPrint('✅ Notifications enabled for $characteristicUuid');
+  }
+
+  /// 🔧 HELPER: Deshabilitar notificaciones en una característica
+  Future<void> _disableNotifications({
+    required final String deviceId,
+    required final fbp.BluetoothCharacteristic characteristic,
+    required final String characteristicUuid,
+  }) async {
+    // Disable notifications - also cleanup subscription
+    await characteristic.setNotifyValue(false);
+
+    final subscriptionKey = '$deviceId:$characteristicUuid';
+    if (_characteristicSubscriptions.containsKey(subscriptionKey)) {
+      debugPrint(
+        '🧹 Canceling subscription for $subscriptionKey (disable)',
+      );
+      await _characteristicSubscriptions[subscriptionKey]?.cancel();
+      _characteristicSubscriptions.remove(subscriptionKey);
+    }
+
+    debugPrint('✅ Notifications disabled for $characteristicUuid');
   }
 
   // ============================================================================
