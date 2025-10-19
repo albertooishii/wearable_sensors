@@ -66,10 +66,15 @@ class DeviceAdapter {
 
     // Crear device base
     // ✅ isNearby: true if discovered (storage==null), false if bonded (storage!=null)
+    // ✅ CRITICAL: For bonded devices (storage != null), FORCE isPairedToSystem=true
+    // because some Android/FlutterBluePlus implementations report paired=false for bonded devices
     final isDiscovered = (storage == null);
+    final isBonded = (storage != null);
+    final isPaired = isBonded ? true : internal.paired; // Force true for bonded
+
     final baseDevice = WearableDevice(
       deviceId: internal.deviceId,
-      connectionState: internal.paired
+      connectionState: isPaired
           ? ConnectionState.disconnected
           : ConnectionState.disconnected,
       name: internal.name.isNotEmpty ? internal.name : null,
@@ -81,7 +86,7 @@ class DeviceAdapter {
       connectedAt: null,
       lastDiscoveredAt: DateTime.now(), // ✅ Mark when discovered
       discoveredServices: [], // Será enriquecido abajo
-      isPairedToSystem: internal.paired,
+      isPairedToSystem: isPaired,
       isNearby: isDiscovered, // ✅ true for discovered, false for bonded
       rssi: internal.rssi,
       requiresAuthentication: requiresAuth,
