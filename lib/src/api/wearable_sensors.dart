@@ -297,7 +297,7 @@ class WearableSensors {
     List<String>? filterByServices,
     bool enriched = false,
     int parallelism = 3,
-    Duration enrichmentTimeout = const Duration(seconds: 3),
+    Duration enrichmentTimeout = const Duration(seconds: 10),
   }) async* {
     _ensureInitialized();
 
@@ -380,6 +380,10 @@ class WearableSensors {
     late EnrichedDeviceScanner scanner;
 
     try {
+      // ✅ CRITICAL: Start BLE scan first - this initiates flutter_blue_plus.startScan()
+      // Without this, rawBleDevicesStream never receives any devices!
+      await _instance!._manager.startScanning(timeout: duration);
+
       // Import the scanner
       scanner = EnrichedDeviceScanner(
         bleService: _instance!._manager.bleService,
@@ -395,7 +399,7 @@ class WearableSensors {
         scanner.discoveredDeviceStorage = _instance!._discoveredStorage;
       }
 
-      // Start scanner
+      // Start scanner (subscribes to BLE scan stream)
       await scanner.start();
 
       // Emit enriched devices
@@ -466,11 +470,20 @@ class WearableSensors {
   /// }
   /// ```
   static Future<List<WearableDevice>> getBondedDevices() async {
+    debugPrint('🔍🔍🔍 [WS] getBondedDevices() CALLED - FIRST LINE');
+    debugPrint('🔍 [WS] getBondedDevices() called START');
     _ensureInitialized();
+    debugPrint(
+      '🔍 [WS] Initialized, about to call _manager.getBondedDevices()',
+    );
 
     try {
+      debugPrint('🔍 [WS] About to call _manager.getBondedDevices()...');
       // Get bonded devices from DeviceConnectionManager
       var bondedDevices = await _instance!._manager.getBondedDevices();
+      debugPrint(
+        '🔍 [WS] ✅ _manager.getBondedDevices() returned: ${bondedDevices.length} devices',
+      );
 
       // ✅ Auto-enriquecimiento: Merge with saved services from storage
       // Similar to EnrichedDeviceScanner, but for bonded devices

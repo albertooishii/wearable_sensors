@@ -690,7 +690,8 @@ class XiaomiAuthService {
       if (!v2_config.SppV2Config.isInitialized) {
         debugPrint('📋 Loading SPP V2 config from device JSON...');
         final deviceType = deviceImplementation.deviceType;
-        final jsonPath = 'assets/device_implementations/$deviceType.json';
+        final jsonPath =
+            'packages/wearable_sensors/assets/device_implementations/$deviceType.json';
         final jsonString = await rootBundle.loadString(jsonPath);
         final deviceJson = jsonDecode(jsonString) as Map<String, dynamic>;
 

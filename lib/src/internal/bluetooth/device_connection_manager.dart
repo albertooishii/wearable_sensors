@@ -212,7 +212,20 @@ class DeviceConnectionManager {
       }
 
       // 2. Detect vendor
-      final vendor = await _detectVendor(deviceId);
+      // Try to get device name from BLE service for improved detection
+      String? deviceName;
+      try {
+        final btDevice = await _bleService.getBluetoothDeviceAsync(deviceId);
+        deviceName =
+            btDevice.platformName.isNotEmpty ? btDevice.platformName : null;
+        if (deviceName != null) {
+          debugPrint('   📱 Device name: $deviceName');
+        }
+      } catch (e) {
+        debugPrint('   ⚠️  Could not get device name: $e');
+      }
+
+      final vendor = await _detectVendor(deviceId, deviceName);
       debugPrint('   🔍 Detected vendor: $vendor');
 
       // 3. Create orchestrator (await because it initializes SppV2Config)
@@ -444,12 +457,18 @@ class DeviceConnectionManager {
   /// }
   /// ```
   Future<List<WearableDevice>> getBondedDevices() async {
+    debugPrint('🔍 [DCM] getBondedDevices() called');
     try {
       // Get bonded devices from BLE service
+      debugPrint('🔍 [DCM] Calling _bleService.getSystemDevices()...');
       final bondedDevices = await _bleService.getSystemDevices();
+      debugPrint('🔍 [DCM] Got ${bondedDevices.length} bonded device(s)');
 
       // Convert BluetoothDevice (internal) to WearableDevice (public)
-      return bondedDevices.map((btDevice) {
+      final wearableDevices = bondedDevices.map((btDevice) {
+        debugPrint(
+          '🔍 [DCM] Converting: ${btDevice.name} (${btDevice.deviceId})',
+        );
         return WearableDevice(
           deviceId: btDevice.deviceId,
           name: btDevice.name,
@@ -459,8 +478,12 @@ class DeviceConnectionManager {
           discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
         );
       }).toList();
-    } catch (e) {
-      debugPrint('❌ Failed to get bonded devices: $e');
+
+      debugPrint('✅ [DCM] Returning ${wearableDevices.length} WearableDevices');
+      return wearableDevices;
+    } catch (e, stackTrace) {
+      debugPrint('❌ [DCM] Failed to get bonded devices: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
       return []; // Return empty list on error
     }
   }
@@ -494,13 +517,17 @@ class DeviceConnectionManager {
     }
   }
 
-  /// Detect vendor from deviceId
+  /// Detect vendor from deviceId and device name
   ///
   /// **Detection logic:**
   /// 1. Check saved metadata in SharedPreferences
-  /// 2. Parse deviceId format (MAC address patterns)
-  /// 3. Fallback to generic
-  Future<DeviceVendor> _detectVendor(final String deviceId) async {
+  /// 2. Try to detect from device name (REGEX patterns like Gadgetbridge)
+  /// 3. Try to detect from MAC address OUI (first 3 bytes)
+  /// 4. Fallback to generic
+  Future<DeviceVendor> _detectVendor(
+    final String deviceId, [
+    final String? deviceName,
+  ]) async {
     // Step 1: Check saved metadata in SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     final savedVendor = prefs.getString('device_vendor_$deviceId');
@@ -509,7 +536,19 @@ class DeviceConnectionManager {
       return _vendorFromString(savedVendor);
     }
 
-    // Step 2: Try to detect from MAC address OUI (first 3 bytes)
+    // Step 2: Try to detect from device name (REGEX like Gadgetbridge)
+    if (deviceName != null && deviceName.isNotEmpty) {
+      debugPrint('   🔍 Attempting device name detection: "$deviceName"');
+      final vendor = _vendorFromDeviceName(deviceName);
+      if (vendor != DeviceVendor.unknown) {
+        debugPrint('   ✅ Vendor from device name: $deviceName → $vendor');
+        // Save for future use
+        await prefs.setString('device_vendor_$deviceId', vendor.toString());
+        return vendor;
+      }
+    }
+
+    // Step 3: Try to detect from MAC address OUI (first 3 bytes)
     // MAC format: "XX:XX:XX:XX:XX:XX" or "XXXXXXXXXXXX"
     try {
       final oui = _extractOui(deviceId);
@@ -558,6 +597,7 @@ class DeviceConnectionManager {
       '5856FF', // Mi Band 8
       '98EF05', // Mi Band variants
       'B4B59D', // Mi Band regional variants
+      '0434C3', // Mi Band 10 (and newer models)
     };
 
     if (xiaomiOuis.contains(oui)) {
@@ -585,6 +625,79 @@ class DeviceConnectionManager {
 
     if (fitbitOuis.contains(oui)) {
       return DeviceVendor.fitbit;
+    }
+
+    return DeviceVendor.unknown;
+  }
+
+  /// Detect vendor from device name using REGEX patterns (from Gadgetbridge)
+  ///
+  /// **Xiaomi patterns extracted from Gadgetbridge coordinators:**
+  /// - Smart Band 10: `^Xiaomi Smart Band 10 [0-9A-F]{4}$` (MiBand10Coordinator)
+  /// - Smart Band 9: `^Xiaomi Smart Band 9 [0-9A-F]{4}$` (MiBand9Coordinator)
+  /// - Smart Band 9 Active: `^Xiaomi( Smart)? Band 9 Active [0-9A-F]{4}$` (MiBand9ActiveCoordinator)
+  /// - Smart Band 8: `^Xiaomi Smart Band 8 [A-Z0-9]{4}$` (MiBand8Coordinator)
+  /// - Smart Band 8 Pro: `^Xiaomi Smart Band 8 Pro [0-9A-F]{4}$` (MiBand8ProCoordinator)
+  /// - Smart Band 8 Active: `^Xiaomi( Smart)? Band 8 Active [A-Z0-9]{4}$` (MiBand8ActiveCoordinator)
+  /// - Smart Band 7: `Xiaomi Smart Band 7` (MiBand7Coordinator - substring match)
+  /// - Mi Band 6: `Mi Smart Band 6` (MiBand6Coordinator - substring match)
+  DeviceVendor _vendorFromDeviceName(String deviceName) {
+    // Xiaomi Smart Band 10 (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi Smart Band 10 [0-9A-F]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 9 (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi Smart Band 9 [0-9A-F]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 9 Active (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi( Smart)? Band 9 Active [0-9A-F]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 8 (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi Smart Band 8 [A-Z0-9]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 8 Pro (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi Smart Band 8 Pro [0-9A-F]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 8 Active (exact pattern from Gadgetbridge)
+    if (RegExp(
+      r'^Xiaomi( Smart)? Band 8 Active [A-Z0-9]{4}$',
+      caseSensitive: false,
+    ).hasMatch(deviceName)) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Xiaomi Smart Band 7 (exact pattern from Gadgetbridge)
+    if (deviceName.contains('Xiaomi Smart Band 7')) {
+      return DeviceVendor.xiaomi;
+    }
+
+    // Mi Smart Band 6 (exact pattern from Gadgetbridge - uses HuamiConst.MI_BAND6_NAME)
+    if (deviceName.contains('Mi Smart Band 6')) {
+      return DeviceVendor.xiaomi;
     }
 
     return DeviceVendor.unknown;
@@ -643,7 +756,7 @@ class DeviceConnectionManager {
       // Load default Xiaomi device JSON (Band 10 as reference)
       // Individual devices will reload their specific config during auth
       final jsonString = await rootBundle.loadString(
-        'assets/device_implementations/xiaomi_smart_band_10.json',
+        'packages/wearable_sensors/assets/device_implementations/xiaomi_smart_band_10.json',
       );
       final deviceJson = jsonDecode(jsonString) as Map<String, dynamic>;
 

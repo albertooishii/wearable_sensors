@@ -499,6 +499,7 @@ class BleService {
   /// - Issue: https://github.com/chipweinberger/flutter_blue_plus/issues/1226
   /// - Android docs: https://developer.android.com/reference/android/bluetooth/BluetoothAdapter#getBondedDevices()
   Future<List<BluetoothDevice>> getSystemDevices() async {
+    debugPrint('🔍 [BLE_SERVICE] getSystemDevices() called START');
     try {
       debugPrint('🔍 Getting BONDED devices (paired in Android Settings)...');
       debugPrint('📱 Platform: Android');
@@ -519,8 +520,32 @@ class BleService {
 
       // ✅ PASO 2: Get bonded (paired) devices - RELIABLE on Android
       // Unlike systemDevices (broken), bondedDevices works consistently
-      final bondedDevices = await fbp.FlutterBluePlus.bondedDevices;
+      debugPrint(
+        '🔍 [BLE_SERVICE] About to call FlutterBluePlus.bondedDevices',
+      );
 
+      List<fbp.BluetoothDevice> bondedDevices;
+      try {
+        bondedDevices = await fbp.FlutterBluePlus.bondedDevices;
+        debugPrint('🔍 [BLE_SERVICE] ✅ bondedDevices returned successfully');
+        debugPrint(
+          '🔍 [BLE_SERVICE] Returned type: ${bondedDevices.runtimeType}',
+        );
+        debugPrint(
+          '🔍 [BLE_SERVICE] Returned as Future<List<BluetoothDevice>>',
+        );
+      } catch (e) {
+        debugPrint('🔍 [BLE_SERVICE] ❌ bondedDevices failed: $e');
+        debugPrint('🔍 [BLE_SERVICE] Exception type: ${e.runtimeType}');
+        rethrow;
+      }
+
+      debugPrint(
+        '🔍 [BLE_SERVICE] Bonded devices count: ${bondedDevices.length}',
+      );
+      debugPrint(
+        '🔍 [BLE_SERVICE] Type of list: ${bondedDevices.runtimeType}',
+      );
       debugPrint('Bonded devices:');
       for (final device in bondedDevices) {
         final deviceId = device.remoteId.str;
@@ -530,6 +555,10 @@ class BleService {
 
         debugPrint('═══════════════════════════════════════════════════');
         debugPrint('📱 Device: $deviceName ($deviceId)');
+        debugPrint('   🏭 Device object type: ${device.runtimeType}');
+        debugPrint('   📝 platformName: "${device.platformName}"');
+        debugPrint('   🔢 remoteId type: ${device.remoteId.runtimeType}');
+        debugPrint('   🔢 remoteId.str: ${device.remoteId.str}');
 
         // 1️⃣ Estado ANTES de intentar conectar
         final bondStateBefore = await device.bondState.first;
