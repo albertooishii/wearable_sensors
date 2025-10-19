@@ -448,12 +448,17 @@ class BleService {
             _loggedDevices.add(deviceKey);
           }
 
-          // ❌ DISABLED: Temp connections cause infinite loop and battery drain
-          // Services will be discovered when user explicitly connects
-          // _discoverServicesForScannedDevice(device, result);
+          // ✅ EMIT: Emitir dispositivo a rawBleDevicesStream para que EnrichedDeviceScanner lo enriquezca
+          final bluetoothDevice = BluetoothDevice.fromBasicInfo(
+            deviceId: device.remoteId.str,
+            name: device.platformName.isNotEmpty ? device.platformName : null,
+            services: [], // Empty - will be enriched by EnrichedDeviceScanner
+            rssi: result.rssi,
+            paired: false, // Will be checked later if needed
+            isSystemDevice: false, // Scanned device, not system device
+          );
 
-          // ✅ HANDLED BY: EnrichedDeviceScanner in wearable_sensors
-          // Device emission is now managed by the upper layer
+          _rawBleDeviceController.add(bluetoothDevice);
         }
       });
     } on Exception catch (e) {
