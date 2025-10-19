@@ -6,6 +6,7 @@ import '../../api/models/device_types_loader.dart';
 import '../../api/models/wearable_device.dart';
 import '../models/bluetooth_device.dart';
 import '../utils/xiaomi_device_detection.dart';
+import '../storage/discovered_device_storage.dart';
 
 /// Adapter that converts between internal BluetoothDevice and public WearableDevice.
 ///
@@ -24,10 +25,17 @@ class DeviceAdapter {
   /// - Cada UUID se busca en el catálogo GATT para obtener metadatos completos
   /// - El dispositivo retornado incluye `discoveredServices` enriquecidos
   ///
+  /// **Saved Device Enrichment (bonded devices):**
+  /// - If [isSavedDevice] is true and [storage] is provided:
+  ///   - Try to load saved copy from storage (has discovered services)
+  ///   - Return saved copy with full services
+  ///   - If no saved copy exists, return with empty services (normal)
+  ///
   /// **Note:** This is async because it needs to load GATT service metadata.
   static Future<WearableDevice> fromInternal(
     BluetoothDevice internal, {
     bool? isSavedDevice,
+    DiscoveredDeviceStorage? storage,
   }) async {
     // Detect device type from advertised services using DeviceTypesLoader
     String detectedDeviceTypeId = 'unknown';
@@ -73,18 +81,40 @@ class DeviceAdapter {
       discoveredServices: [], // Será enriquecido abajo
       isSavedDevice: isSavedDevice ?? false,
       isPairedToSystem: internal.paired,
-      isNearby: !internal.paired, // ✅ DISCOVERED = nearby (if not paired)
+      isNearby:
+          (isSavedDevice == false), // ✅ true for discovered, false for bonded
       rssi: internal.rssi,
       requiresAuthentication: requiresAuth,
       authenticationMethod: authMethod,
     );
 
-    // Enriquecer con servicios GATT si hay UUIDs disponibles
+    // ✅ CRITICAL: Always enrich services before returning if they exist
+    // This ensures UI only receives fully-enriched devices
     if (internal.services.isNotEmpty) {
       return await WearableDevice.enrichServicesFromUuids(
         baseDevice,
         internal.services,
       );
+    }
+
+    // ✅ For bonded devices, try loading saved copy with services from storage
+    if ((isSavedDevice == true) && storage != null) {
+      try {
+        final savedCopy = await storage.getDevice(internal.deviceId);
+        if (savedCopy != null && savedCopy.discoveredServices.isNotEmpty) {
+          // ✅ Found saved copy with services - use it!
+          return savedCopy.copyWith(
+            // Update fresh info from current scan
+            lastSeen: DateTime.now(),
+            lastDiscoveredAt: DateTime.now(),
+            name: internal.name.isNotEmpty ? internal.name : savedCopy.name,
+            rssi: internal.rssi,
+          );
+        }
+      } catch (e) {
+        // Silently ignore storage errors - not critical
+        // Device will be returned without services (normal for unpaired)
+      }
     }
 
     return baseDevice;

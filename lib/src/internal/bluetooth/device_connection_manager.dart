@@ -27,6 +27,7 @@ import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_connection_o
 import 'package:wearable_sensors/src/internal/models/bluetooth_device.dart';
 import 'package:wearable_sensors/src/internal/utils/xiaomi_device_detection.dart';
 import 'package:wearable_sensors/src/internal/adapters/device_adapter.dart';
+import '../storage/discovered_device_storage.dart';
 
 /// Vendor detection result
 enum DeviceVendor { xiaomi, fitbit, apple, generic, unknown }
@@ -70,6 +71,9 @@ class DeviceConnectionManager {
   // ✅ Stream subscriptions per device (to cancel on disconnect/reconnect)
   final Map<String, List<StreamSubscription<dynamic>>> _streamSubscriptions =
       {};
+
+  // Storage for discovered devices (bonded device enrichment)
+  DiscoveredDeviceStorage? _discoveredDeviceStorage;
 
   // Stream controller for device states (UI consumption)
   final StreamController<Map<String, WearableDevice>> _deviceStatesController =
@@ -127,13 +131,18 @@ class DeviceConnectionManager {
   ///   runApp(MyApp());
   /// }
   /// ```
-  Future<void> initialize() async {
+  Future<void> initialize({
+    DiscoveredDeviceStorage? discoveredDeviceStorage,
+  }) async {
     if (_isInitialized) {
       debugPrint('⚠️  DeviceConnectionManager already initialized');
       return;
     }
 
     debugPrint('🚀 Initializing DeviceConnectionManager...');
+
+    // Store discovered device storage (for bonded device enrichment)
+    _discoveredDeviceStorage = discoveredDeviceStorage;
 
     // Initialize core services
     _bleService = BleService();
@@ -144,6 +153,18 @@ class DeviceConnectionManager {
 
     // 🔌 Load bonded/paired devices from system
     await _loadBondedDevices();
+
+    // 🔍 Subscribe to discovered devices stream (populate _deviceStates as devices are found)
+    // This ensures discovered devices are enriched and emitted via deviceStatesStream
+    discoveredDevicesStream.listen(
+      (_) {
+        // asyncMap in discoveredDevicesStream handles enrichment + emission
+        // Just need to consume the stream to trigger the asyncMap
+      },
+      onError: (error) {
+        debugPrint('❌ Error in discoveredDevicesStream: $error');
+      },
+    );
 
     _isInitialized = true;
     debugPrint('✅ DeviceConnectionManager initialized');
@@ -444,18 +465,31 @@ class DeviceConnectionManager {
     return _bleService.rawBleDevicesStream.asyncMap((btDevice) async {
       final deviceId = btDevice.deviceId;
 
+      debugPrint(
+        '🔍 [discoveredDevicesStream] Processing: ${btDevice.name} ($deviceId)',
+      );
+
       // Only process if not already in _deviceStates (avoid duplicates)
       if (!_deviceStates.containsKey(deviceId)) {
+        debugPrint('   🆕 New device, enriching...');
         try {
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
             isSavedDevice: false,
+            storage: _discoveredDeviceStorage,
           );
           _deviceStates[deviceId] = enrichedDevice;
-        } catch (e) {
+          debugPrint('   ✅ Enriched discovered device: ${btDevice.name}');
+          debugPrint(
+            '      - Services: ${enrichedDevice.discoveredServices.length}',
+          );
+        } catch (e, stackTrace) {
           debugPrint('   ⚠️  Error enriching device $deviceId: $e');
+          debugPrint('   Stack trace: $stackTrace');
           // Fallback: create basic device without enrichment
+          // ⚠️ Only emit if enrichment fails AND device type is unsupported
+          // This ensures we don't emit broken devices
           final basicDevice = WearableDevice(
             deviceId: deviceId,
             name: btDevice.name,
@@ -463,15 +497,26 @@ class DeviceConnectionManager {
             connectionState: ConnectionState.disconnected,
             isPairedToSystem: false,
             isSavedDevice: false,
-            isNearby: !btDevice.paired,
+            isNearby: true, // ✅ Always true for discovered devices
             discoveredServices: [],
             lastDiscoveredAt: DateTime.now(),
           );
           _deviceStates[deviceId] = basicDevice;
+          debugPrint('   📌 Created fallback basic device for $deviceId');
         }
 
         // Emit updated deviceStates to UI
+        debugPrint(
+          '   📡 Emitting ${_deviceStates.length} total devices to deviceStatesStream:',
+        );
+        for (final device in _deviceStates.values) {
+          debugPrint(
+            '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}',
+          );
+        }
         _deviceStatesController.add(Map.unmodifiable(_deviceStates));
+      } else {
+        debugPrint('   ⏭️  Device already in _deviceStates, skipping');
       }
 
       return btDevice;
@@ -520,6 +565,7 @@ class DeviceConnectionManager {
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
             isSavedDevice: true,
+            storage: _discoveredDeviceStorage,
           );
           wearableDevices.add(enrichedDevice);
           debugPrint(
@@ -787,14 +833,26 @@ class DeviceConnectionManager {
       // Convert to WearableDevice using DeviceAdapter (includes enrichment)
       for (final btDevice in bondedDevices) {
         try {
+          debugPrint(
+            '   🔄 Enriching device: ${btDevice.name} (${btDevice.deviceId})',
+          );
+
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
             isSavedDevice: true,
+            storage: _discoveredDeviceStorage,
           );
           _deviceStates[btDevice.deviceId] = enrichedDevice;
-        } catch (e) {
+
+          debugPrint('   ✅ Enriched device: ${btDevice.name}');
+          debugPrint(
+            '      - Services: ${enrichedDevice.discoveredServices.length}',
+          );
+          debugPrint('      - Device Type: ${enrichedDevice.deviceTypeId}');
+        } catch (e, stackTrace) {
           debugPrint('   ⚠️  Error enriching device ${btDevice.deviceId}: $e');
+          debugPrint('   Stack trace: $stackTrace');
           // Fallback: create basic device without enrichment
           final basicDevice = WearableDevice(
             deviceId: btDevice.deviceId,
@@ -805,10 +863,21 @@ class DeviceConnectionManager {
             discoveredServices: [],
           );
           _deviceStates[btDevice.deviceId] = basicDevice;
+          debugPrint(
+            '   📌 Created fallback basic device for ${btDevice.deviceId}',
+          );
         }
       }
 
       // Emit to stream for UI
+      debugPrint(
+          '   📡 Emitting ${_deviceStates.length} bonded devices to deviceStatesStream',
+      );
+      for (final device in _deviceStates.values) {
+        debugPrint(
+            '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}',
+        );
+      }
       _deviceStatesController.add(Map.unmodifiable(_deviceStates));
       debugPrint('✅ Bonded devices loaded and emitted to stream');
     } on Exception catch (e) {

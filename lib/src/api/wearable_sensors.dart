@@ -164,9 +164,13 @@ class WearableSensors {
       _instance!._discoveredDeviceStorage =
           SharedPreferencesDiscoveredDeviceStorage();
 
-      await _instance!._connectionManager!.initialize();
-      await _instance!._storageService!.initialize();
       await _instance!._discoveredDeviceStorage!.initialize();
+      
+      // ✅ Pass discovered device storage to connection manager (for bonded device enrichment)
+      await _instance!._connectionManager!.initialize(
+        discoveredDeviceStorage: _instance!._discoveredDeviceStorage,
+      );
+      await _instance!._storageService!.initialize();
 
       if (forceReset) {
         await _instance!._storageService!.clearAll();
