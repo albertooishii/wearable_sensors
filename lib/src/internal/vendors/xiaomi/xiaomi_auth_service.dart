@@ -1813,35 +1813,41 @@ class XiaomiAuthService {
   /// - Sends hour, minute, second, millisecond
   /// - Sends timezone offset and DST offset
   /// - Sends time format preference (24h or 12h)
+  /// - ✨ FIXED: Now sends UTC time instead of local time
   Future<void> _syncTimeToDevice(
     final int commandType,
     final int cmdClock,
   ) async {
     try {
       final now = DateTime.now();
+      final utcNow = now.toUtc(); // ✨ Convert to UTC
       final timeZoneOffsetMinutes = now.timeZoneOffset.inMinutes;
       final timeZoneOffsetQuarters = timeZoneOffsetMinutes ~/ 15;
 
+      // ✨ NEW: Calculate DST offset
+      final dstOffsetMinutes = _calculateDstOffsetMinutes(now);
+      final dstOffsetQuarters = (dstOffsetMinutes / 15).floor();
+
       debugPrint(
-        '   📅 Device time sync: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} '
-        'UTC${_formatUtcOffset(timeZoneOffsetMinutes)}',
+        '   📅 Device time sync (UTC): ${utcNow.year}-${utcNow.month.toString().padLeft(2, '0')}-${utcNow.day.toString().padLeft(2, '0')} '
+        '${utcNow.hour.toString().padLeft(2, '0')}:${utcNow.minute.toString().padLeft(2, '0')}:${utcNow.second.toString().padLeft(2, '0')} '
+        'UTC${_formatUtcOffset(timeZoneOffsetMinutes)} (DST: ${dstOffsetMinutes ~/ 60}h)',
       );
 
       // Build protobuf Clock message using pb.Clock
       final clock = pb.Clock()
         ..time = (pb.Time()
-          ..hour = now.hour
-          ..minute = now.minute
-          ..second = now.second
-          ..millisecond = now.millisecond)
+          ..hour = utcNow.hour // ✨ UTC, not local
+          ..minute = utcNow.minute
+          ..second = utcNow.second
+          ..millisecond = utcNow.millisecond)
         ..date = (pb.Date()
-          ..year = now.year
-          ..month = now.month
-          ..day = now.day)
+          ..year = utcNow.year // ✨ UTC, not local
+          ..month = utcNow.month
+          ..day = utcNow.day)
         ..timezone = (pb.TimeZone()
           ..zoneOffset = timeZoneOffsetQuarters
-          ..dstOffset = 0
+          ..dstOffset = dstOffsetQuarters // ✨ NEW: Calculate DST
           ..name = 'UTC${_formatUtcOffset(timeZoneOffsetMinutes)}');
 
       final system = pb.System()..clock = clock;
@@ -2199,40 +2205,45 @@ class XiaomiAuthService {
     try {
       debugPrint('🕐 Synchronizing current time with device...');
 
-      // Obtener fecha y hora actual del sistema (UTC para debugging)
+      // Get current date and time (local + UTC)
       final now = DateTime.now();
-      final utcNow = now.toUtc();
+      final utcNow = now.toUtc(); // ✨ Convert to UTC
       final timeZone = now.timeZoneOffset;
+
+      // ✨ NEW: Calculate DST offset
+      final dstOffsetMinutes = _calculateDstOffsetMinutes(now);
 
       debugPrint('🕐 RAW SYSTEM TIME:');
       debugPrint('   Local time: $now');
       debugPrint('   UTC time: $utcNow');
       debugPrint('   TimeZone offset: $timeZone (${timeZone.inMinutes} min)');
+      debugPrint('   DST offset: $dstOffsetMinutes min');
 
-      // Detectar si el sistema usa formato 24 horas (por defecto en móviles)
-      final is24HourFormat = true; // TODO: Obtener de configuración del usuario
+      // Detect if system uses 24-hour format (default on mobile)
+      final is24HourFormat = true; // TODO: Get from user configuration
 
-      // ✅ CRITICAL: Use LOCAL time, not UTC (Gadgetbridge uses GregorianCalendar.getInstance())
-      final timeToSend = now; // Local time
+      // ✨ CRITICAL: Use UTC time, not local (Gadgetbridge compatibility)
+      final timeToSend = utcNow;
 
-      // Crear protobuf Clock
+      // Create protobuf Clock
       final clock = pb.Clock.create()
         ..time = (pb.Time.create()
-          ..hour = timeToSend.hour
+          ..hour = timeToSend.hour // ✨ UTC, not local
           ..minute = timeToSend.minute
           ..second = timeToSend.second
           ..millisecond = timeToSend.millisecond)
         ..date = (pb.Date.create()
-          ..year = timeToSend.year
-          ..month = timeToSend
-              .month // DateTime.month ya es 1-based (igual que Gadgetbridge + 1)
+          ..year = timeToSend.year // ✨ UTC, not local
+          ..month = timeToSend.month
           ..day = timeToSend.day)
         ..timezone = (pb.TimeZone.create()
           ..zoneOffset =
               (timeZone.inMinutes / 15).floor() // Use floor like Gadgetbridge
-          ..dstOffset = 0 // TODO: Calculate DST offset like Gadgetbridge
-          ..name = timeZone.toString()) // Ej: "+02:00"
-        ..isNot24hour = !is24HourFormat; // Crear comando System con Clock
+          ..dstOffset =
+              (dstOffsetMinutes / 15).floor() // ✨ NEW: Calculate DST offset
+          ..name = timeZone.toString()) // E.g: "+02:00"
+        ..isNot24hour = !is24HourFormat;
+
       final command = pb.Command.create()
         ..type = 2 // COMMAND_TYPE (System)
         ..subtype = 3 // CMD_CLOCK
@@ -2245,10 +2256,14 @@ class XiaomiAuthService {
         '   📅 Date: ${timeToSend.year}-${timeToSend.month.toString().padLeft(2, '0')}-${timeToSend.day.toString().padLeft(2, '0')}',
       );
       debugPrint(
-        '   🕐 Time: ${timeToSend.hour.toString().padLeft(2, '0')}:${timeToSend.minute.toString().padLeft(2, '0')}:${timeToSend.second.toString().padLeft(2, '0')}.${timeToSend.millisecond}',
+        '   🕐 Time (UTC): ${timeToSend.hour.toString().padLeft(2, '0')}:${timeToSend.minute.toString().padLeft(2, '0')}:${timeToSend.second.toString().padLeft(2, '0')}.${timeToSend.millisecond}',
       );
       debugPrint(
         '   🌍 Timezone: ${timeZone.toString()} (offset: ${(timeZone.inMinutes / 15).floor()} units of 15min)',
+      );
+      final dstHours = dstOffsetMinutes ~/ 60;
+      debugPrint(
+        '   🌞 DST Offset: ${(dstOffsetMinutes / 15).floor()} units ($dstHours hours)',
       );
       debugPrint('   ⏰ 24h format: $is24HourFormat');
       debugPrint('   📦 Clock protobuf values:');
@@ -2269,18 +2284,17 @@ class XiaomiAuthService {
       debugPrint('      payload size: ${payload.length} bytes');
       debugPrint('      SPP version: $_sppVersion');
 
-      // Enviar comando según protocolo SPP
+      // Send command according to SPP protocol
       if (_sppVersion == SppProtocolVersion.v2) {
-        // SPP V2: Usar SppV2ProtocolHandler
+        // SPP V2: Use SppV2ProtocolHandler
         await _sppV2Handler!.sendData(
           deviceId,
-          channel:
-              SppV2Channel.protobufCommand, // Canal para comandos del sistema
+          channel: SppV2Channel.protobufCommand, // Channel for system commands
           payload: payload,
         );
         debugPrint('✅ Time sync sent via SPP V2');
       } else {
-        // SPP V1: Usar protocolo V1 tradicional
+        // SPP V1: Use traditional V1 protocol
         await _sendSppPacket(
           channel: XiaomiSppChannel.protobufCommand,
           payload: payload,
@@ -2288,7 +2302,9 @@ class XiaomiAuthService {
         debugPrint('✅ Time sync sent via SPP V1');
       }
 
-      debugPrint('🕐 Current time synchronization completed');
+      debugPrint(
+        '🕐 Current time synchronization completed (UTC: ${utcNow.hour}:${utcNow.minute}, Zone: UTC+${timeZone.inMinutes ~/ 60}, DST: ${dstOffsetMinutes ~/ 60}h)',
+      );
     } on Exception catch (e) {
       debugPrint('❌ Failed to sync time: $e');
       // No-fatal: time sync failure shouldn't break authentication
@@ -2397,6 +2413,27 @@ class XiaomiAuthService {
   }
 
   /// Cleanup resources
+  /// Calculate DST (Daylight Saving Time) offset in minutes
+  ///
+  /// In Spain:
+  /// - Winter (Oct-Mar): UTC+1 (no DST)
+  /// - Summer (Mar-Oct): UTC+2 (DST = +1 hour)
+  ///
+  /// Returns: DST offset in minutes (0 or 60)
+  int _calculateDstOffsetMinutes(DateTime time) {
+    // Compare difference between local time and UTC
+    // If 2 hours = Summer time (DST active)
+    final localToUtcDiff = time.difference(time.toUtc()).inHours;
+
+    if (localToUtcDiff == 2) {
+      // Summer time (UTC+2) = DST active
+      return 60; // DST offset = 1 hour
+    }
+
+    // Winter time (UTC+1) = no DST
+    return 0;
+  }
+
   void dispose() {
     _dataSubscription?.cancel();
     _dataSubscription = null;
