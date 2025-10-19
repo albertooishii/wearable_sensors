@@ -23,10 +23,10 @@ import 'package:wearable_sensors/src/internal/bluetooth/vendor_orchestrator.dart
 import 'package:wearable_sensors/src/internal/bluetooth/ble_service.dart';
 import 'package:wearable_sensors/src/internal/bluetooth/bluetooth_classic_service.dart';
 import 'package:wearable_sensors/src/internal/bluetooth/spp_v2_config.dart';
-import 'package:wearable_sensors/src/internal/bluetooth/biometric_data_reader.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_connection_orchestrator.dart';
 import 'package:wearable_sensors/src/internal/models/bluetooth_device.dart';
-import 'package:wearable_sensors/src/internal/storage/discovered_device_storage.dart';
+import 'package:wearable_sensors/src/internal/utils/xiaomi_device_detection.dart';
+import 'package:wearable_sensors/src/internal/adapters/device_adapter.dart';
 
 /// Vendor detection result
 enum DeviceVendor { xiaomi, fitbit, apple, generic, unknown }
@@ -40,7 +40,6 @@ enum DeviceVendor { xiaomi, fitbit, apple, generic, unknown }
 ///    ```dart
 ///    final manager = DeviceConnectionManager();
 ///    await manager.initialize();
-///    manager.autoReconnectSavedDevices(); // Optional
 ///    ```
 ///
 /// 2. **UI Connect:**
@@ -64,8 +63,6 @@ class DeviceConnectionManager {
   // Core services (injected during initialize)
   late final BleService _bleService;
   late final BluetoothClassicService _btClassicService;
-  DiscoveredDeviceStorage?
-      _discoveredDeviceStorage; // ✅ NEW: Storage for discovered devices
 
   // Active connections (deviceId → orchestrator)
   final Map<String, VendorOrchestrator> _activeConnections = {};
@@ -73,11 +70,6 @@ class DeviceConnectionManager {
   // ✅ Stream subscriptions per device (to cancel on disconnect/reconnect)
   final Map<String, List<StreamSubscription<dynamic>>> _streamSubscriptions =
       {};
-
-  // Stream controller for aggregated connection states
-  final StreamController<Map<String, ConnectionState>>
-      _connectionStatesController =
-      StreamController<Map<String, ConnectionState>>.broadcast();
 
   // Stream controller for device states (UI consumption)
   final StreamController<Map<String, WearableDevice>> _deviceStatesController =
@@ -93,16 +85,6 @@ class DeviceConnectionManager {
 
   /// Public getter for BleService (needed for WearableSensors.getBluetoothStatus())
   BleService get bleService => _bleService;
-
-  /// Setter para inyectar discovered device storage
-  /// ✅ Called from WearableSensors.initialize()
-  set discoveredDeviceStorage(final DiscoveredDeviceStorage storage) {
-    _discoveredDeviceStorage = storage;
-  }
-
-  /// Connection states stream (all devices)
-  Stream<Map<String, ConnectionState>> get connectionStatesStream =>
-      _connectionStatesController.stream;
 
   /// Device states stream (all devices) - For UI consumption
   ///
@@ -237,30 +219,42 @@ class DeviceConnectionManager {
         connectionState: ConnectionState.disconnected,
       );
 
+      // 🔴 FIX: Add orchestrator to _activeConnections BEFORE subscribing
+      // This ensures that when state changes come in, _activeConnections is populated
+      // so that _emitConnectionStates() has data to emit
+      _activeConnections[deviceId] = orchestrator;
+
       // ✅ 5. Subscribe to orchestrator streams (store subscriptions for cleanup)
+      // All updates go through _updateDeviceState() which emits to _deviceStatesController
+      // NO emitting to legacy _connectionStatesController (not exposed in public API)
       final subscriptions = <StreamSubscription<dynamic>>[];
 
       subscriptions.add(
         orchestrator.connectionStateStream.listen((final state) {
+          debugPrint('📡 [DCM] Connection state changed: $state');
           _updateDeviceState(deviceId, connectionState: state);
-          _emitConnectionStates();
+          // ✅ _updateDeviceState() emits to _deviceStatesController
+          // 🚫 NO _emitConnectionStates() - that's internal legacy stream
         }),
       );
 
       subscriptions.add(
         orchestrator.batteryStream.listen((final battery) {
+          debugPrint('🔋 [DCM] Battery updated: $battery%');
           _updateDeviceState(deviceId, batteryLevel: battery);
         }),
       );
 
       subscriptions.add(
         orchestrator.biometricDataStream.listen((final data) {
+          debugPrint('📊 [DCM] Biometric data received at ${data.timestamp}');
           _updateDeviceState(deviceId, lastDataTimestamp: data.timestamp);
         }),
       );
 
       subscriptions.add(
         orchestrator.errorStream.listen((final error) {
+          debugPrint('⚠️ [DCM] Device error: ${error.message}');
           _updateDeviceState(deviceId, error: error);
         }),
       );
@@ -294,36 +288,45 @@ class DeviceConnectionManager {
         debugPrint('   ⚠️ discoveredDeviceTypeId is null, skipping update');
       }
 
-      // 7.5. ✅ MOMENTO 1: Save device to discovered device storage
-      // This is the primary save point after successful authentication
-      if (_discoveredDeviceStorage != null) {
-        try {
-          final currentDevice = _deviceStates[deviceId];
-          if (currentDevice != null) {
-            final deviceToSave = currentDevice.copyWith(
-              lastDiscoveredAt: DateTime.now(),
-            );
-            await _discoveredDeviceStorage!.saveDevice(deviceToSave);
-            debugPrint(
-              '💾 [DCM] Saved device to storage (Moment 1 - after connectAndAuthenticate)',
-            );
-          }
-        } catch (e) {
-          debugPrint('⚠️ [DCM] Error saving device to storage: $e');
-          // Non-critical: continue connection
-        }
-      }
-
-      // 8. Store in active connections
-      _activeConnections[deviceId] = orchestrator;
+      // ✅ Orchestrator already stored in _activeConnections before subscriptions
+      // (see step 4 above - moved before subscribing for stream emission)
 
       debugPrint('✅ DeviceConnectionManager: Device connected');
-    } catch (e, stackTrace) {
+    } on Exception catch (e, stackTrace) {
       debugPrint('═══════════════════════════════════════════════════');
       debugPrint('❌ [DCM] connectAndAuthenticate() FAILED with exception:');
       debugPrint('   Exception: $e');
       debugPrint('═══════════════════════════════════════════════════');
       debugPrint('Stack trace: $stackTrace');
+
+      // ✅ NEW: Detect if error is authentication-related (missing credentials)
+      // Mark device with requiresAuthentication = true so UI can show "Authenticate" button
+      final errorString = e.toString().toLowerCase();
+      if (errorString.contains('no credentials found') ||
+          errorString.contains('authentication failed') ||
+          errorString.contains('authentication required')) {
+        debugPrint(
+          '🔑 [DCM] Authentication error detected - marking device as requiresAuthentication=true',
+        );
+
+        // Detect authentication method based on vendor
+        final vendor = await _detectVendor(deviceId, null);
+        final authMethod = vendor == DeviceVendor.xiaomi
+            ? AuthenticationType.xiaomiSpp
+            : AuthenticationType.unknown;
+
+        debugPrint(
+          '🔑 [DCM] Auth method detected: $authMethod (vendor: $vendor)',
+        );
+
+        _updateDeviceState(
+          deviceId,
+          requiresAuthentication: true,
+          authenticationMethod: authMethod,
+          connectionState: ConnectionState.disconnected,
+        );
+      }
+
       rethrow;
     }
   }
@@ -362,7 +365,8 @@ class DeviceConnectionManager {
       debugPrint('   - _deviceStates.length: ${_deviceStates.length}');
       debugPrint('   - _deviceStates.keys: ${_deviceStates.keys.toList()}');
 
-      _emitConnectionStates();
+      // ✅ Emit to deviceStatesStream (single source of truth)
+      // 🚫 NO _emitConnectionStates() - that's internal legacy stream
       _deviceStatesController.add(Map.unmodifiable(_deviceStates));
       debugPrint(
         '✅ DeviceConnectionManager: Device disconnected + stream emitted',
@@ -430,8 +434,48 @@ class DeviceConnectionManager {
   ///
   /// Broadcast stream that emits devices as they're found.
   /// Subscribe before calling [startScanning].
+  ///
+  /// ✅ CRITICAL: Also emits discovered devices to [deviceStatesStream]
+  /// so UI receives them in real-time via WearableSensors.deviceStates
+  ///
+  /// **Enrichment:** Each discovered device is enriched using DeviceAdapter
+  /// which includes service UUIDs, device type detection, and auth method detection.
   Stream<BluetoothDevice> get discoveredDevicesStream {
-    return _bleService.rawBleDevicesStream;
+    return _bleService.rawBleDevicesStream.asyncMap((btDevice) async {
+      final deviceId = btDevice.deviceId;
+
+      // Only process if not already in _deviceStates (avoid duplicates)
+      if (!_deviceStates.containsKey(deviceId)) {
+        try {
+          // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          final enrichedDevice = await DeviceAdapter.fromInternal(
+            btDevice,
+            isSavedDevice: false,
+          );
+          _deviceStates[deviceId] = enrichedDevice;
+        } catch (e) {
+          debugPrint('   ⚠️  Error enriching device $deviceId: $e');
+          // Fallback: create basic device without enrichment
+          final basicDevice = WearableDevice(
+            deviceId: deviceId,
+            name: btDevice.name,
+            macAddress: deviceId,
+            connectionState: ConnectionState.disconnected,
+            isPairedToSystem: false,
+            isSavedDevice: false,
+            isNearby: !btDevice.paired,
+            discoveredServices: [],
+            lastDiscoveredAt: DateTime.now(),
+          );
+          _deviceStates[deviceId] = basicDevice;
+        }
+
+        // Emit updated deviceStates to UI
+        _deviceStatesController.add(Map.unmodifiable(_deviceStates));
+      }
+
+      return btDevice;
+    });
   }
 
   /// Check if a device is bonded at system level
@@ -464,20 +508,40 @@ class DeviceConnectionManager {
       final bondedDevices = await _bleService.getSystemDevices();
       debugPrint('🔍 [DCM] Got ${bondedDevices.length} bonded device(s)');
 
-      // Convert BluetoothDevice (internal) to WearableDevice (public)
-      final wearableDevices = bondedDevices.map((btDevice) {
-        debugPrint(
-          '🔍 [DCM] Converting: ${btDevice.name} (${btDevice.deviceId})',
-        );
-        return WearableDevice(
-          deviceId: btDevice.deviceId,
-          name: btDevice.name,
-          macAddress: btDevice.deviceId,
-          connectionState: ConnectionState.disconnected,
-          isPairedToSystem: true,
-          discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
-        );
-      }).toList();
+      // Convert BluetoothDevice (internal) to WearableDevice (public) using DeviceAdapter
+      // This includes enrichment: services, device type, auth method
+      final wearableDevices = <WearableDevice>[];
+      for (final btDevice in bondedDevices) {
+        try {
+          debugPrint(
+            '🔍 [DCM] Enriching: ${btDevice.name} (${btDevice.deviceId})',
+          );
+          // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          final enrichedDevice = await DeviceAdapter.fromInternal(
+            btDevice,
+            isSavedDevice: true,
+          );
+          wearableDevices.add(enrichedDevice);
+          debugPrint(
+            '   ✅ Device Type: ${enrichedDevice.deviceTypeId}',
+          );
+        } catch (e) {
+          debugPrint(
+            '   ⚠️  Error enriching device ${btDevice.deviceId}: $e',
+          );
+          // Fallback: create basic device without enrichment
+          wearableDevices.add(
+            WearableDevice(
+              deviceId: btDevice.deviceId,
+              name: btDevice.name,
+              macAddress: btDevice.deviceId,
+              connectionState: ConnectionState.disconnected,
+              isPairedToSystem: true,
+              discoveredServices: [],
+            ),
+          );
+        }
+      }
 
       debugPrint('✅ [DCM] Returning ${wearableDevices.length} WearableDevices');
       return wearableDevices;
@@ -485,35 +549,6 @@ class DeviceConnectionManager {
       debugPrint('❌ [DCM] Failed to get bonded devices: $e');
       debugPrint('❌ Stack trace: $stackTrace');
       return []; // Return empty list on error
-    }
-  }
-
-  /// Auto-reconnect to saved devices
-  ///
-  /// Called at app startup (optional, based on user settings).
-  /// Loads saved devices and attempts to reconnect.
-  Future<void> autoReconnectSavedDevices() async {
-    debugPrint('🔄 Auto-reconnecting saved devices...');
-
-    try {
-      final savedDeviceIds = await _getSavedDeviceIds();
-
-      if (savedDeviceIds.isEmpty) {
-        debugPrint('   ℹ️  No saved devices found');
-        return;
-      }
-
-      debugPrint('   📱 Found ${savedDeviceIds.length} saved devices');
-
-      // Reconnect in parallel (fire & forget, don't block)
-      for (final deviceId in savedDeviceIds) {
-        // Ignore errors (device may be off/out of range)
-        connectDevice(deviceId).catchError((final error) {
-          debugPrint('   ⚠️  Auto-reconnect failed for $deviceId: $error');
-        });
-      }
-    } on Exception catch (e) {
-      debugPrint('❌ Auto-reconnect error: $e');
     }
   }
 
@@ -641,64 +676,20 @@ class DeviceConnectionManager {
   /// - Smart Band 8 Active: `^Xiaomi( Smart)? Band 8 Active [A-Z0-9]{4}$` (MiBand8ActiveCoordinator)
   /// - Smart Band 7: `Xiaomi Smart Band 7` (MiBand7Coordinator - substring match)
   /// - Mi Band 6: `Mi Smart Band 6` (MiBand6Coordinator - substring match)
+  /// Detect vendor from device name using centralized Xiaomi detection
+  ///
+  /// Uses XiaomiDeviceDetection for all Xiaomi patterns (from Gadgetbridge).
+  /// Can be extended for other vendors (Fitbit, Apple, Garmin, etc.).
   DeviceVendor _vendorFromDeviceName(String deviceName) {
-    // Xiaomi Smart Band 10 (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi Smart Band 10 [0-9A-F]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
+    // ✅ Use centralized Xiaomi detection
+    if (XiaomiDeviceDetection.isXiaomiDevice(deviceName)) {
       return DeviceVendor.xiaomi;
     }
 
-    // Xiaomi Smart Band 9 (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi Smart Band 9 [0-9A-F]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Xiaomi Smart Band 9 Active (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi( Smart)? Band 9 Active [0-9A-F]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Xiaomi Smart Band 8 (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi Smart Band 8 [A-Z0-9]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Xiaomi Smart Band 8 Pro (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi Smart Band 8 Pro [0-9A-F]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Xiaomi Smart Band 8 Active (exact pattern from Gadgetbridge)
-    if (RegExp(
-      r'^Xiaomi( Smart)? Band 8 Active [A-Z0-9]{4}$',
-      caseSensitive: false,
-    ).hasMatch(deviceName)) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Xiaomi Smart Band 7 (exact pattern from Gadgetbridge)
-    if (deviceName.contains('Xiaomi Smart Band 7')) {
-      return DeviceVendor.xiaomi;
-    }
-
-    // Mi Smart Band 6 (exact pattern from Gadgetbridge - uses HuamiConst.MI_BAND6_NAME)
-    if (deviceName.contains('Mi Smart Band 6')) {
-      return DeviceVendor.xiaomi;
-    }
+    // TODO: Add other vendors
+    // if (FitbitDeviceDetection.isFitbitDevice(deviceName)) {
+    //   return DeviceVendor.fitbit;
+    // }
 
     return DeviceVendor.unknown;
   }
@@ -768,19 +759,13 @@ class DeviceConnectionManager {
     }
   }
 
-  /// Get list of saved device IDs from storage
-  Future<List<String>> _getSavedDeviceIds() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('saved_device_ids') ?? [];
-  }
-
   /// Load bonded/paired devices from system and populate deviceStatesStream
   ///
   /// **Called during initialize()** to populate the "My Devices" section in UI.
   ///
   /// **Workflow:**
   /// 1. Get bonded devices from BLE service (via FlutterBluePlus.bondedDevices)
-  /// 2. Convert to WearableDevice models with isPairedToSystem = true
+  /// 2. Enrich each device with DeviceAdapter (services, device type, auth method)
   /// 3. Add to _deviceStates cache
   /// 4. Emit to deviceStatesStream for UI consumption
   Future<void> _loadBondedDevices() async {
@@ -799,21 +784,28 @@ class DeviceConnectionManager {
 
       debugPrint('   📱 Found ${bondedDevices.length} bonded device(s)');
 
-      // Convert to WearableDevice and add to cache
+      // Convert to WearableDevice using DeviceAdapter (includes enrichment)
       for (final btDevice in bondedDevices) {
-        final deviceState = WearableDevice(
-          deviceId: btDevice.deviceId,
-          name: btDevice.name,
-          macAddress: btDevice.deviceId,
-          connectionState: ConnectionState.disconnected,
-          isPairedToSystem: true,
-          discoveredServices: [], // Empty - enrich with enrichServicesFromUuids() after
-        );
-
-        _deviceStates[btDevice.deviceId] = deviceState;
-        debugPrint(
-          '   ✅ Added bonded device: ${deviceState.name} (${deviceState.deviceId})',
-        );
+        try {
+          // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          final enrichedDevice = await DeviceAdapter.fromInternal(
+            btDevice,
+            isSavedDevice: true,
+          );
+          _deviceStates[btDevice.deviceId] = enrichedDevice;
+        } catch (e) {
+          debugPrint('   ⚠️  Error enriching device ${btDevice.deviceId}: $e');
+          // Fallback: create basic device without enrichment
+          final basicDevice = WearableDevice(
+            deviceId: btDevice.deviceId,
+            name: btDevice.name,
+            macAddress: btDevice.deviceId,
+            connectionState: ConnectionState.disconnected,
+            isPairedToSystem: true,
+            discoveredServices: [],
+          );
+          _deviceStates[btDevice.deviceId] = basicDevice;
+        }
       }
 
       // Emit to stream for UI
@@ -824,13 +816,21 @@ class DeviceConnectionManager {
     }
   }
 
-  /// Emit current connection states to stream
-  void _emitConnectionStates() {
-    final states = connectionStates;
-    _connectionStatesController.add(states);
+  /// Update device state and emit to deviceStatesStream
+  /// 🔐 Update device state when credentials are saved (public API)
+  ///
+  /// Called by WearableSensors.saveDeviceCredentials() to notify that
+  /// credentials have been saved and requiresAuthentication should be false.
+  void updateDeviceAuthenticationState(
+    final String deviceId, {
+    required final bool requiresAuthentication,
+  }) {
+    _updateDeviceState(
+      deviceId,
+      requiresAuthentication: requiresAuthentication,
+    );
   }
 
-  /// Update device state and emit to deviceStatesStream
   void _updateDeviceState(
     final String deviceId, {
     final ConnectionState? connectionState,
@@ -838,6 +838,8 @@ class DeviceConnectionManager {
     final DateTime? lastDataTimestamp,
     final ConnectionError? error,
     final String? deviceTypeId,
+    final bool? requiresAuthentication,
+    final AuthenticationType? authenticationMethod,
   }) {
     final currentState = _deviceStates[deviceId] ??
         WearableDevice(
@@ -857,6 +859,8 @@ class DeviceConnectionManager {
             )
           : null,
       deviceTypeId: deviceTypeId,
+      requiresAuthentication: requiresAuthentication,
+      authenticationMethod: authenticationMethod,
     );
 
     // ✅ Only emit if state actually changed (uses WearableDevice.==)
@@ -891,37 +895,6 @@ class DeviceConnectionManager {
   /// - BLE devices → via characteristic 0x2A19
   /// - Auto-detects transport based on device implementation
   ///
-  /// **Result**: Updates deviceStatesStream automatically via stream listener
-  Future<void> requestBatteryUpdate(final String deviceId) async {
-    try {
-      debugPrint(
-        '🔋 [DCM] Requesting battery update via BiometricDataReader...',
-      );
-      debugPrint('   - deviceId: $deviceId');
-
-      // ✅ Use BiometricDataReader for universal battery access
-      final reader = BiometricDataReader();
-      final batterySample = await reader.read(deviceId, SensorType.battery);
-
-      if (batterySample != null) {
-        final batteryLevel = batterySample.value as int?;
-        if (batteryLevel != null) {
-          debugPrint('   ✅ Battery received: $batteryLevel%');
-
-          // Update device state (which emits to deviceStatesStream)
-          _updateDeviceState(deviceId, batteryLevel: batteryLevel);
-        } else {
-          debugPrint('   ⚠️  Battery sample has null value');
-        }
-      } else {
-        debugPrint('   ⚠️  Battery read returned null');
-      }
-    } on Exception catch (e, stackTrace) {
-      debugPrint('❌ requestBatteryUpdate failed: $e');
-      debugPrint('Stack trace: $stackTrace');
-    }
-  }
-
   /// Cancel stream subscriptions for a device
   Future<void> _cancelStreamSubscriptions(final String deviceId) async {
     final subscriptions = _streamSubscriptions[deviceId];
@@ -953,7 +926,6 @@ class DeviceConnectionManager {
       await disconnectDevice(deviceId);
     }
 
-    await _connectionStatesController.close();
     await _deviceStatesController.close();
 
     _isInitialized = false;

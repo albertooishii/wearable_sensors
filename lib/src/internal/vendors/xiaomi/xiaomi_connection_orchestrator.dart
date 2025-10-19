@@ -267,6 +267,14 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
 
       debugPrint('   ✅ BLE authentication successful');
       debugPrint('   🔑 Encryption keys obtained and saved');
+
+      // ✅ CRITICAL FIX: Emit "connected" state IMMEDIATELY after auth success
+      // This provides immediate UI feedback even if post-auth commands fail
+      // Device transitions: authenticating → connected (for UI)
+      _updateState(ConnectionState.connected);
+      debugPrint(
+        '   ✅ Emitted ConnectionState.connected (auth success confirmed)',
+      );
     } catch (e) {
       debugPrint('   ❌ BLE authentication failed: $e');
       rethrow;

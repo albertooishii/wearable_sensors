@@ -11,6 +11,7 @@
 //
 
 import '../enums/connection_state.dart';
+import '../enums/authentication_type.dart';
 import '../exceptions/connection_exception.dart';
 import '../gatt_services_catalog.dart';
 import 'gatt_service.dart';
@@ -60,7 +61,12 @@ class WearableDevice {
           const [],
       isSavedDevice: json['isSavedDevice'] as bool? ?? false,
       isPairedToSystem: json['isPairedToSystem'] as bool? ?? false,
+      isNearby: json['isNearby'] as bool? ?? false,
       rssi: json['rssi'] as int?,
+      requiresAuthentication: json['requiresAuthentication'] as bool? ?? false,
+      authenticationMethod: AuthenticationType.fromString(
+        json['authenticationMethod'] as String?,
+      ),
     );
   }
   const WearableDevice({
@@ -77,8 +83,11 @@ class WearableDevice {
     this.discoveredServices = const [],
     this.isSavedDevice = false,
     this.isPairedToSystem = false,
+    this.isNearby = false,
     this.rssi,
     this.error,
+    this.requiresAuthentication = false,
+    this.authenticationMethod = AuthenticationType.none,
   });
 
   final String deviceId;
@@ -97,8 +106,13 @@ class WearableDevice {
       discoveredServices; // ✅ GATT Service objects descubiertos en conexión
   final bool isSavedDevice;
   final bool isPairedToSystem;
+  final bool isNearby; // ✅ NEW: True if currently discovered during active scan
   final int? rssi; // Signal strength
   final ConnectionException? error;
+  final bool
+      requiresAuthentication; // ✅ NEW: True if device needs auth (Xiaomi without keys)
+  final AuthenticationType
+      authenticationMethod; // ✅ NEW: Type of auth required (xiaomi_spp, none, etc)
 
   // Backwards compatibility aliases
   String get id => deviceId; // Alias for WearableDevice.id
@@ -161,8 +175,11 @@ class WearableDevice {
     final List<GattService>? discoveredServices, // ✅ GATT Services actualizados
     final bool? isSavedDevice,
     final bool? isPairedToSystem,
+    final bool? isNearby,
     final int? rssi,
     final ConnectionException? error,
+    final bool? requiresAuthentication,
+    final AuthenticationType? authenticationMethod,
   }) {
     return WearableDevice(
       deviceId: deviceId,
@@ -178,8 +195,12 @@ class WearableDevice {
       discoveredServices: discoveredServices ?? this.discoveredServices,
       isSavedDevice: isSavedDevice ?? this.isSavedDevice,
       isPairedToSystem: isPairedToSystem ?? this.isPairedToSystem,
+      isNearby: isNearby ?? this.isNearby,
       rssi: rssi ?? this.rssi,
       error: error ?? this.error,
+      requiresAuthentication:
+          requiresAuthentication ?? this.requiresAuthentication,
+      authenticationMethod: authenticationMethod ?? this.authenticationMethod,
     );
   }
 
@@ -199,7 +220,10 @@ class WearableDevice {
       'discoveredServices': discoveredServices.map((s) => s.toJson()).toList(),
       'isSavedDevice': isSavedDevice,
       'isPairedToSystem': isPairedToSystem,
+      'isNearby': isNearby,
       'rssi': rssi,
+      'requiresAuthentication': requiresAuthentication,
+      'authenticationMethod': authenticationMethod.id,
     };
   }
 
@@ -216,6 +240,8 @@ class WearableDevice {
     final String? deviceTypeId,
     final int? rssi,
     final bool isPaired = false,
+    final bool requiresAuthentication = false,
+    final AuthenticationType authenticationMethod = AuthenticationType.none,
   }) {
     return WearableDevice(
       deviceId: deviceId,
@@ -226,6 +252,8 @@ class WearableDevice {
       discoveredServices: const [], // ✅ Vacío inicialmente
       rssi: rssi,
       isPairedToSystem: isPaired,
+      requiresAuthentication: requiresAuthentication,
+      authenticationMethod: authenticationMethod,
     );
   }
 
@@ -251,7 +279,7 @@ class WearableDevice {
             name: 'Unknown Service',
             description: 'Unknown service UUID',
             category: 'generic',
-            iconName: 'help',
+            iconName: 'help_outline',
             colorName: 'grey',
             isGeneric: true,
           ),
@@ -309,8 +337,11 @@ class WearableDevice {
         discoveredServices.length == other.discoveredServices.length &&
         isSavedDevice == other.isSavedDevice &&
         isPairedToSystem == other.isPairedToSystem &&
+        isNearby == other.isNearby &&
         rssi == other.rssi &&
-        error == other.error;
+        error == other.error &&
+        requiresAuthentication == other.requiresAuthentication &&
+        authenticationMethod == other.authenticationMethod;
   }
 
   /// HashCode excluding time-based fields
@@ -328,8 +359,11 @@ class WearableDevice {
       discoveredServices.length,
       isSavedDevice,
       isPairedToSystem,
+      isNearby,
       rssi,
       error,
+      requiresAuthentication,
+      authenticationMethod,
     );
   }
 }

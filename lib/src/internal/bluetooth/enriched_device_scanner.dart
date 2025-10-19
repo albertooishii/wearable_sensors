@@ -166,7 +166,12 @@ class EnrichedDeviceScanner {
     debugPrint(
       '⏳ Waiting for ${_enrichmentInProgress.length} pending enrichments...',
     );
-    await Future.wait(_enrichmentInProgress.values);
+    // Use eagerError: false to wait for all enrichments even if some fail
+    // This prevents unhandled exceptions from propagating up
+    await Future.wait(
+      _enrichmentInProgress.values,
+      eagerError: false,
+    );
 
     await _resultsController.close();
     debugPrint('✅ EnrichedDeviceScanner stopped');
@@ -447,7 +452,7 @@ class EnrichedDeviceScanner {
               name: 'Unknown Service',
               description: 'Service $shortUuid not in registry',
               category: 'vendor',
-              iconName: 'help',
+              iconName: 'help_outline',
               colorName: 'grey',
               isGeneric: false,
             );

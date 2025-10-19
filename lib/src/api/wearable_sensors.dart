@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
-import '../internal/adapters/device_adapter.dart';
 import '../internal/bluetooth/device_connection_manager.dart';
 import '../internal/bluetooth/biometric_data_reader.dart';
-import '../internal/bluetooth/enriched_device_scanner.dart';
 import '../internal/services/device_storage_service.dart';
 import '../internal/storage/discovered_device_storage.dart';
 import '../internal/storage/shared_preferences_discovered_device_storage.dart';
@@ -14,6 +12,7 @@ import '../internal/utils/device_implementation_loader.dart';
 import '../internal/vendors/xiaomi/xiaomi_device_credentials.dart';
 import '../internal/vendors/xiaomi/xiaomi_auth_service.dart'; // For EncryptionKeys
 import 'enums/connection_state.dart';
+import 'enums/device_filter.dart';
 import 'enums/sensor_type.dart';
 import 'exceptions/authentication_exception.dart';
 import 'exceptions/connection_exception.dart';
@@ -38,21 +37,25 @@ import 'models/wearable_device.dart';
 /// // 1. Initialize the package
 /// await WearableSensors.initialize();
 ///
-/// // 2. Scan for devices
-/// final stream = WearableSensors.scan(duration: Duration(seconds: 10));
-/// await for (final device in stream) {
-///   print('Found: ${device.name}');
-/// }
+/// // 2. Scan for devices (starts background discovery)
+/// await WearableSensors.scan(duration: Duration(seconds: 15));
 ///
-/// // 3. Connect to a device
+/// // 3. Listen to discovered devices via stream
+/// WearableSensors.deviceStream(filter: DeviceFilter.nearby).listen((devices) {
+///   for (final device in devices.values) {
+///     print('Found: ${device.name}');
+///   }
+/// });
+///
+/// // 4. Connect to a device
 /// final device = await WearableSensors.connect(deviceId);
 /// print('Connected to: ${device.name}');
 ///
-/// // 4. Read sensor data
+/// // 5. Read sensor data
 /// final reading = await WearableSensors.read(deviceId, SensorType.heartRate);
 /// print('Heart Rate: ${reading.value} ${reading.unit}');
 ///
-/// // 5. Stream real-time data
+/// // 6. Stream real-time data
 /// final dataStream = WearableSensors.stream(deviceId, SensorType.heartRate);
 /// await for (final reading in dataStream) {
 ///   print('HR: ${reading.value} bpm');
@@ -165,10 +168,6 @@ class WearableSensors {
       await _instance!._storageService!.initialize();
       await _instance!._discoveredDeviceStorage!.initialize();
 
-      // ✅ Inject discovered device storage into DeviceConnectionManager
-      _instance!._connectionManager!.discoveredDeviceStorage =
-          _instance!._discoveredDeviceStorage!;
-
       if (forceReset) {
         await _instance!._storageService!.clearAll();
         await _instance!._discoveredDeviceStorage!.cleanupAll();
@@ -271,293 +270,57 @@ class WearableSensors {
   // DEVICE DISCOVERY
   // ============================================================
 
-  /// Scans for nearby wearable devices.
+  /// Starts a background scan for nearby wearable devices.
   ///
-  /// Returns a stream of discovered devices. Devices may appear multiple times
-  /// as RSSI (signal strength) updates are received.
+  /// This method initiates a Bluetooth scan. Discovered devices will be emitted to
+  /// [deviceStream] automatically.
+  ///
+  /// **Separation of Concerns:**
+  /// - `scan()` = Action: Initiates background discovery
+  /// - `deviceStream(filter: DeviceFilter.nearby)` = Consumer: Receives discovered devices
   ///
   /// **Parameters:**
   /// - [duration]: How long to scan (default: 10 seconds)
-  /// - [filterByServices]: Only return devices advertising these BLE service UUIDs
   ///
-  /// **Returns:** Stream of [WearableDevice] objects as they're discovered.
+  /// **Returns:** `true` if scan started successfully.
   ///
   /// **Throws:**
   /// - [WearableException] if Bluetooth is disabled or scanning fails
   ///
   /// **Example:**
   /// ```dart
-  /// final stream = WearableSensors.scan(duration: Duration(seconds: 10));
-  /// await for (final device in stream) {
-  ///   print('Found: ${device.name} (${device.rssi} dBm)');
-  /// }
-  /// ```
-  static Stream<WearableDevice> scan({
-    Duration duration = const Duration(seconds: 10),
-    List<String>? filterByServices,
-    bool enriched = false,
-    int parallelism = 3,
-    Duration enrichmentTimeout = const Duration(seconds: 10),
-  }) async* {
-    _ensureInitialized();
-
-    try {
-      if (enriched) {
-        // ✅ ENRICHED SCAN: Connect to each device to get full info
-        yield* _scanEnriched(
-          duration: duration,
-          parallelism: parallelism,
-          enrichmentTimeout: enrichmentTimeout,
-          filterByServices: filterByServices,
-        );
-      } else {
-        // ✅ BASIC SCAN: Fast BLE discovery only (no connections)
-        yield* _scanBasic(
-          duration: duration,
-          filterByServices: filterByServices,
-        );
-      }
-    } catch (e, stackTrace) {
-      throw ConnectionException(
-        'Failed to scan for devices: $e',
-        code: 'SCAN_FAILED',
-        cause: e,
-        stackTrace: stackTrace,
-      );
-    }
-  }
-
-  /// Basic BLE scan - Fast discovery without enrichment
-  static Stream<WearableDevice> _scanBasic({
-    required Duration duration,
-    List<String>? filterByServices,
-  }) async* {
-    debugPrint('📡 Starting BASIC scan (${duration.inSeconds}s)...');
-
-    try {
-      // Start scanning via DeviceConnectionManager
-      await _instance!._manager.startScanning(timeout: duration);
-
-      // Listen to discovered devices stream
-      await for (final bleDevice
-          in _instance!._manager.discoveredDevicesStream) {
-        // Apply service filter if provided (post-scan filtering)
-        if (filterByServices != null && filterByServices.isNotEmpty) {
-          final hasRequestedService = bleDevice.services.any(
-            (serviceUuid) =>
-                filterByServices.contains(serviceUuid.toLowerCase()),
-          );
-
-          if (!hasRequestedService) {
-            continue;
-          }
-        }
-
-        yield await DeviceAdapter.fromInternal(bleDevice);
-      }
-    } catch (e, stackTrace) {
-      debugPrint('❌ Basic scan failed: $e');
-      throw ConnectionException(
-        'Basic scan failed: $e',
-        code: 'BASIC_SCAN_FAILED',
-        cause: e,
-        stackTrace: stackTrace,
-      );
-    }
-  }
-
-  /// Enriched scan - Discovers devices with full info (services, battery, type)
-  static Stream<WearableDevice> _scanEnriched({
-    required Duration duration,
-    required int parallelism,
-    required Duration enrichmentTimeout,
-    List<String>? filterByServices,
-  }) async* {
-    debugPrint(
-      '🔍 Starting ENRICHED scan (${duration.inSeconds}s, parallelism: $parallelism)...',
-    );
-
-    late EnrichedDeviceScanner scanner;
-
-    try {
-      // ✅ CRITICAL: Start BLE scan first - this initiates flutter_blue_plus.startScan()
-      // Without this, rawBleDevicesStream never receives any devices!
-      await _instance!._manager.startScanning(timeout: duration);
-
-      // Import the scanner
-      scanner = EnrichedDeviceScanner(
-        bleService: _instance!._manager.bleService,
-        discoveredDevicesStream:
-            _instance!._manager.bleService.rawBleDevicesStream,
-        duration: duration,
-        parallelism: parallelism,
-        enrichmentTimeout: enrichmentTimeout,
-      );
-
-      // Inject discovered device storage for persistence (Moment 2 save)
-      if (_instance != null) {
-        scanner.discoveredDeviceStorage = _instance!._discoveredStorage;
-      }
-
-      // Start scanner (subscribes to BLE scan stream)
-      await scanner.start();
-
-      // Emit enriched devices
-      await for (final enrichedDevice in scanner.resultsStream) {
-        // Apply filter if provided
-        if (filterByServices != null && filterByServices.isNotEmpty) {
-          final hasRequestedService = enrichedDevice.discoveredServices.any(
-            (service) => filterByServices.contains(service.uuid.toLowerCase()),
-          );
-
-          if (!hasRequestedService) {
-            continue;
-          }
-        }
-
-        yield enrichedDevice;
-      }
-    } catch (e, stackTrace) {
-      debugPrint('❌ Enriched scan failed: $e');
-      throw ConnectionException(
-        'Enriched scan failed: $e',
-        code: 'ENRICHED_SCAN_FAILED',
-        cause: e,
-        stackTrace: stackTrace,
-      );
-    } finally {
-      await scanner.dispose();
-    }
-  }
-
-  /// Stream of all discovered devices during active scan.
+  /// // Start scan
+  /// await WearableSensors.scan(duration: Duration(seconds: 15));
   ///
-  /// This is a broadcast stream that emits devices as they're found.
-  /// Subscribe to this stream before calling [scan()].
-  ///
-  /// **Example:**
-  /// ```dart
-  /// WearableSensors.discoveredDevices().listen((device) {
-  ///   print('Discovered: ${device.name}');
+  /// // Listen to results via deviceStream
+  /// WearableSensors.deviceStream(
+  ///   filter: DeviceFilter.nearby,
+  ///   enrich: true, // Only emit fully enriched devices (with services)
+  /// ).listen((devices) {
+  ///   for (final device in devices.values) {
+  ///     print('Found: ${device.name} (${device.discoveredServices.length} services)');
+  ///   }
   /// });
-  ///
-  /// WearableSensors.scan(); // Start scanning
   /// ```
-  static Stream<WearableDevice> discoveredDevices() async* {
+  static Future<bool> scan({
+    Duration duration = const Duration(seconds: 10),
+  }) async {
     _ensureInitialized();
-    await for (final bleDevice in _instance!._manager.discoveredDevicesStream) {
-      yield await DeviceAdapter.fromInternal(bleDevice);
-    }
-  }
-
-  /// Gets list of devices that are bonded (paired) at the system level.
-  ///
-  /// These devices have been paired through the OS Bluetooth settings,
-  /// not necessarily through this app. They may still require app-level
-  /// authentication to actually connect and read data.
-  ///
-  /// Auto-enriquecimiento: Devices are automatically enriched with
-  /// saved services from previous connections if available (from permanent cache).
-  /// This allows bonded devices to show their GATT services without re-connecting.
-  ///
-  /// **Returns:** List of system-bonded [WearableDevice] objects (auto-enriched).
-  ///
-  /// **Example:**
-  /// ```dart
-  /// final bonded = await WearableSensors.getBondedDevices();
-  /// for (final device in bonded) {
-  ///   print('Bonded: ${device.name} - Enriched: ${device.isEnriched}');
-  /// }
-  /// ```
-  static Future<List<WearableDevice>> getBondedDevices() async {
-    debugPrint('🔍🔍🔍 [WS] getBondedDevices() CALLED - FIRST LINE');
-    debugPrint('🔍 [WS] getBondedDevices() called START');
-    _ensureInitialized();
-    debugPrint(
-      '🔍 [WS] Initialized, about to call _manager.getBondedDevices()',
-    );
 
     try {
-      debugPrint('🔍 [WS] About to call _manager.getBondedDevices()...');
-      // Get bonded devices from DeviceConnectionManager
-      var bondedDevices = await _instance!._manager.getBondedDevices();
       debugPrint(
-        '🔍 [WS] ✅ _manager.getBondedDevices() returned: ${bondedDevices.length} devices',
+        '📡 [WearableSensors] Starting background scan (${duration.inSeconds}s)',
       );
 
-      // ✅ Auto-enriquecimiento: Merge with saved services from storage
-      // Similar to EnrichedDeviceScanner, but for bonded devices
-      final enrichedDevices = <WearableDevice>[];
+      // Start BLE scanning in background via DeviceConnectionManager
+      await _instance!._manager.startScanning(timeout: duration);
 
-      for (final device in bondedDevices) {
-        final macAddress = device.macAddress;
-        if (macAddress != null && device.discoveredServices.isEmpty) {
-          // Check if we have saved services for this MAC address
-          final savedDevice =
-              await _instance!._discoveredStorage.getDevice(macAddress);
-          if (savedDevice != null &&
-              savedDevice.discoveredServices.isNotEmpty) {
-            // Merge: use saved services
-            enrichedDevices.add(
-              device.copyWith(
-                discoveredServices: savedDevice.discoveredServices,
-                lastDiscoveredAt: savedDevice.lastDiscoveredAt,
-              ),
-            );
-          } else {
-            // No saved services, keep as-is
-            enrichedDevices.add(device);
-          }
-        } else {
-          enrichedDevices.add(device);
-        }
-      }
-
-      return enrichedDevices;
+      debugPrint('✅ [WearableSensors] Scan started successfully');
+      return true;
     } catch (e, stackTrace) {
-      throw WearableException(
-        'Failed to get bonded devices: $e',
-        code: 'BONDED_DEVICES_FAILED',
-        cause: e,
-        stackTrace: stackTrace,
-      );
-    }
-  }
-
-  /// Gets list of all saved devices with their discovered services.
-  ///
-  /// Returns devices that have been saved after successful connection and
-  /// service discovery. This is a **historial** of devices this app has
-  /// ever connected to and enriched.
-  ///
-  /// **Use cases:**
-  /// - Show a list of "Previously connected" devices
-  /// - Migrate data when app is reinstalled
-  /// - Debug and diagnostics (see what devices were discovered)
-  ///
-  /// **Note:** This is different from [getBondedDevices()]:
-  /// - getBondedDevices() = System-level paired devices (may be empty if bonded elsewhere)
-  /// - getSavedDevices() = Devices this app has connected to and saved
-  ///
-  /// **Returns:** List of all saved [WearableDevice] objects (with full services).
-  ///
-  /// **Example:**
-  /// ```dart
-  /// final saved = await WearableSensors.getSavedDevices();
-  /// print('Previously connected devices: ${saved.length}');
-  /// for (final device in saved) {
-  ///   print('  ${device.name} (${device.macAddress}) - ${device.discoveredServices.length} services');
-  /// }
-  /// ```
-  static Future<List<WearableDevice>> getSavedDevices() async {
-    _ensureInitialized();
-
-    try {
-      return await _instance!._discoveredStorage.getAllDevices();
-    } catch (e, stackTrace) {
-      throw WearableException(
-        'Failed to get saved devices: $e',
-        code: 'SAVED_DEVICES_FAILED',
+      throw ConnectionException(
+        'Failed to start scan: $e',
+        code: 'SCAN_FAILED',
         cause: e,
         stackTrace: stackTrace,
       );
@@ -873,23 +636,116 @@ class WearableSensors {
     }
   }
 
-  /// Stream of connection state changes for all devices.
+  /// Stream of devices filtered by type (bonded, nearby, saved, or all).
   ///
-  /// Emits a map of deviceId → ConnectionState whenever any device's
-  /// connection state changes.
+  /// This is the unified streaming API for device discovery and monitoring.
+  /// All devices flow through this single stream with configurable filtering.
+  ///
+  /// **Parameters:**
+  /// - [filter]: Which devices to stream (bonded, nearby, saved, all)
+  /// - [enrich]: Whether to enrich devices with GATT services (default: true)
+  ///
+  /// **Returns:** `Stream<Map<String, WearableDevice>>` where keys are device IDs.
   ///
   /// **Example:**
   /// ```dart
-  /// WearableSensors.allConnectionStates.listen((states) {
-  ///   states.forEach((deviceId, state) {
-  ///     print('$deviceId: ${state.displayName}');
+  /// // Listen to bonded devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.bonded)
+  ///   .listen((deviceMap) {
+  ///     for (final device in deviceMap.values) {
+  ///       print('${device.name}: ${device.statusText}');
+  ///     }
   ///   });
-  /// });
+  ///
+  /// // Listen to nearby devices during scan
+  /// WearableSensors.deviceStream(filter: DeviceFilter.nearby)
+  ///   .listen((deviceMap) {
+  ///     print('Found ${deviceMap.length} nearby devices');
+  ///   });
+  ///
+  /// // Listen to all devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.all)
+  ///   .listen((allDevices) {
+  ///     // Your device list is always up to date
+  ///   });
   /// ```
-  static Stream<Map<String, ConnectionState>> get allConnectionStates {
+  ///
+  /// **Filter Behavior:**
+  /// - `DeviceFilter.bonded`: System-paired devices (may be empty if paired elsewhere)
+  /// - `DeviceFilter.nearby`: Devices found during active scan (temporary, cleared when scan stops)
+  /// - `DeviceFilter.saved`: Devices previously connected and enriched (persistent history)
+  /// - `DeviceFilter.all`: All of the above (union of bonded + nearby + saved)
+  ///
+  /// **Enrichment Behavior:**
+  /// - If `enrich=true` and device is nearby (not bonded/saved):
+  ///   - Only emits once device has discovered services (fully enriched)
+  ///   - This prevents showing incomplete devices during discovery phase
+  /// - If `enrich=false` or device is bonded/saved:
+  ///   - Emits immediately (may have 0 services initially)
+  ///
+  /// **Name Filtering:**
+  /// - If `skipUnnamed=true` (default):
+  ///   - Discovered devices without names or "Unknown Device": FILTERED OUT
+  ///   - Bonded devices without names: SHOWN (user should see their bonded devices)
+  /// - If `skipUnnamed=false`:
+  ///   - All devices shown regardless of name
+  ///
+  /// **Real-time Updates:**
+  /// Stream emits whenever ANY device changes (connection, battery, properties, etc.)
+  static Stream<Map<String, WearableDevice>> deviceStream({
+    required DeviceFilter filter,
+    bool enrich = true,
+    bool skipUnnamed = true,
+  }) async* {
     _ensureInitialized();
-    return _instance!._manager.connectionStatesStream;
-    // ConnectionState is already public type, no adapter needed
+
+    await for (final allDevices in _instance!._manager.deviceStatesStream) {
+      // Filter devices based on criteria
+      final filtered = <String, WearableDevice>{};
+
+      for (final entry in allDevices.entries) {
+        final device = entry.value;
+
+        // Check if device matches the filter FIRST
+        final matches = filter.matches(
+          isPairedToSystem: device.isPairedToSystem,
+          isSavedDevice: device.isSavedDevice,
+          isNearby: device.isNearby,
+        );
+
+        if (!matches) {
+          continue;
+        }
+
+        // Filter by name ONLY for discovered devices if skipUnnamed=true
+        if (skipUnnamed && device.isNearby && !device.isPairedToSystem) {
+          // For discovered (nearby) devices, skip if:
+          // - Name is null/empty
+          // - Name is "Unknown Device"
+          final hasValidName = device.name != null &&
+              device.name!.isNotEmpty &&
+              device.name != 'Unknown Device';
+          if (!hasValidName) {
+            continue; // Skip unnamed/unknown discovered devices
+          }
+        }
+        // For bonded devices (isPairedToSystem=true): ALWAYS show them,
+        // even without names (user intentionally bonded)
+
+        // Filter by enrichment status if enrich=true
+        if (enrich && device.isNearby && !device.isPairedToSystem) {
+          // For discovered (nearby) devices, only emit if fully enriched
+          if (device.discoveredServices.isEmpty) {
+            continue; // Wait until services are discovered
+          }
+        }
+
+        // Device passed all filters - include it
+        filtered[entry.key] = device;
+      }
+
+      yield filtered;
+    }
   }
 
   // ============================================================
@@ -1403,6 +1259,21 @@ class WearableSensors {
     debugPrint(
       '✅ [WearableSensors] Credentials saved for device $deviceId (type: $authenticationType)',
     );
+
+    // ✅ UPDATE device state: credentials saved → requiresAuthentication=false
+    // This notifies the connection manager that the device no longer needs auth
+    try {
+      _instance?._manager.updateDeviceAuthenticationState(
+        deviceId,
+        requiresAuthentication: false,
+      );
+      debugPrint(
+        '✅ [WearableSensors] Updated device state: requiresAuthentication=false for $deviceId',
+      );
+    } catch (e) {
+      debugPrint('⚠️ [WearableSensors] Error updating device state: $e');
+      // Non-critical: credentials were still saved successfully
+    }
   }
 
   /// Retrieves authentication credentials for a device.

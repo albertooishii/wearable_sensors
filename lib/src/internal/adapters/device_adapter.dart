@@ -1,9 +1,11 @@
 import '../../api/enums/connection_state.dart';
+import '../../api/enums/authentication_type.dart';
 import '../../api/enums/sensor_type.dart' as api;
 import '../../api/models/device_capabilities.dart';
 import '../../api/models/device_types_loader.dart';
 import '../../api/models/wearable_device.dart';
 import '../models/bluetooth_device.dart';
+import '../utils/xiaomi_device_detection.dart';
 
 /// Adapter that converts between internal BluetoothDevice and public WearableDevice.
 ///
@@ -40,6 +42,20 @@ class DeviceAdapter {
       }
     }
 
+    // ✅ Detect authentication method based on device type
+    // For new/unpaired devices, set requiresAuthentication=true if they need auth
+    AuthenticationType authMethod = AuthenticationType.none;
+    bool requiresAuth = false;
+
+    // Xiaomi devices require AuthKey extraction
+    // Use REGEX patterns from Gadgetbridge for reliable detection
+    if (_isXiaomiDevice(detectedDeviceTypeId, internal.name)) {
+      authMethod = AuthenticationType.xiaomiSpp;
+      // Only require auth if NOT paired yet
+      // Paired devices might have credentials stored already
+      requiresAuth = !internal.paired;
+    }
+
     // Crear device base
     final baseDevice = WearableDevice(
       deviceId: internal.deviceId,
@@ -53,10 +69,14 @@ class DeviceAdapter {
       lastDataTimestamp: null,
       lastSeen: DateTime.now(),
       connectedAt: null,
+      lastDiscoveredAt: DateTime.now(), // ✅ Mark when discovered
       discoveredServices: [], // Será enriquecido abajo
       isSavedDevice: isSavedDevice ?? false,
       isPairedToSystem: internal.paired,
+      isNearby: !internal.paired, // ✅ DISCOVERED = nearby (if not paired)
       rssi: internal.rssi,
+      requiresAuthentication: requiresAuth,
+      authenticationMethod: authMethod,
     );
 
     // Enriquecer con servicios GATT si hay UUIDs disponibles
@@ -133,5 +153,18 @@ class DeviceAdapter {
       default:
         return null; // Unknown sensor type
     }
+  }
+
+  /// ✅ Helper: Detect if device is Xiaomi using centralized patterns
+  ///
+  /// Uses XiaomiDeviceDetection which has all patterns from Gadgetbridge.
+  static bool _isXiaomiDevice(String deviceTypeId, String deviceName) {
+    // First try: deviceTypeId check
+    if (deviceTypeId.toLowerCase().contains('xiaomi')) {
+      return true;
+    }
+
+    // Second: Use centralized Xiaomi detection patterns
+    return XiaomiDeviceDetection.isXiaomiDevice(deviceName);
   }
 }
