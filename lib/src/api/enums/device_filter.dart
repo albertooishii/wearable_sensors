@@ -7,8 +7,7 @@
 /// Determines which devices are included in the stream:
 /// - [bonded]: Only system-bonded devices (paired through OS settings)
 /// - [nearby]: Only devices discovered during active BLE scan
-/// - [saved]: Only devices saved in app storage (custom saved devices)
-/// - [all]: All devices (bonded + nearby + saved)
+/// - [all]: All devices (bonded + nearby combined)
 enum DeviceFilter {
   /// System-bonded devices (iOS/Android Bluetooth settings)
   /// Usually paired before, will be auto-enriched on init
@@ -18,11 +17,7 @@ enum DeviceFilter {
   /// Populated while scan is running, cleared when scan stops
   nearby,
 
-  /// Devices saved in app storage (custom selections)
-  /// Persist across app restarts
-  saved,
-
-  /// All devices (bonded + nearby + saved combined)
+  /// All devices (bonded + nearby combined)
   all,
 }
 
@@ -33,8 +28,6 @@ extension DeviceFilterX on DeviceFilter {
         return 'My Devices';
       case DeviceFilter.nearby:
         return 'Scanned Devices';
-      case DeviceFilter.saved:
-        return 'Saved Devices';
       case DeviceFilter.all:
         return 'All Devices';
     }
@@ -43,7 +36,6 @@ extension DeviceFilterX on DeviceFilter {
   /// Check if a device should be included in this filter
   bool matches({
     required bool isPairedToSystem,
-    required bool isSavedDevice,
     required bool isNearby,
   }) {
     switch (this) {
@@ -51,10 +43,8 @@ extension DeviceFilterX on DeviceFilter {
         return isPairedToSystem;
       case DeviceFilter.nearby:
         return isNearby;
-      case DeviceFilter.saved:
-        return isSavedDevice;
       case DeviceFilter.all:
-        return isPairedToSystem || isSavedDevice || isNearby;
+        return isPairedToSystem || isNearby;
     }
   }
 }

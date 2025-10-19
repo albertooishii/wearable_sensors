@@ -165,7 +165,7 @@ class WearableSensors {
           SharedPreferencesDiscoveredDeviceStorage();
 
       await _instance!._discoveredDeviceStorage!.initialize();
-      
+
       // ✅ Pass discovered device storage to connection manager (for bonded device enrichment)
       await _instance!._connectionManager!.initialize(
         discoveredDeviceStorage: _instance!._discoveredDeviceStorage,
@@ -713,7 +713,6 @@ class WearableSensors {
         // Check if device matches the filter FIRST
         final matches = filter.matches(
           isPairedToSystem: device.isPairedToSystem,
-          isSavedDevice: device.isSavedDevice,
           isNearby: device.isNearby,
         );
 

@@ -474,10 +474,10 @@ class DeviceConnectionManager {
         debugPrint('   🆕 New device, enriching...');
         try {
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          // storage: null = discovered device (no saved copy lookup)
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
-            isSavedDevice: false,
-            storage: _discoveredDeviceStorage,
+            storage: null,
           );
           _deviceStates[deviceId] = enrichedDevice;
           debugPrint('   ✅ Enriched discovered device: ${btDevice.name}');
@@ -496,7 +496,6 @@ class DeviceConnectionManager {
             macAddress: deviceId,
             connectionState: ConnectionState.disconnected,
             isPairedToSystem: false,
-            isSavedDevice: false,
             isNearby: true, // ✅ Always true for discovered devices
             discoveredServices: [],
             lastDiscoveredAt: DateTime.now(),
@@ -562,9 +561,9 @@ class DeviceConnectionManager {
             '🔍 [DCM] Enriching: ${btDevice.name} (${btDevice.deviceId})',
           );
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          // storage: _discoveredDeviceStorage = bonded device (try loading saved copy)
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
-            isSavedDevice: true,
             storage: _discoveredDeviceStorage,
           );
           wearableDevices.add(enrichedDevice);
@@ -838,9 +837,9 @@ class DeviceConnectionManager {
           );
 
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
+          // storage: _discoveredDeviceStorage = bonded device (try loading saved copy)
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
-            isSavedDevice: true,
             storage: _discoveredDeviceStorage,
           );
           _deviceStates[btDevice.deviceId] = enrichedDevice;
@@ -871,11 +870,11 @@ class DeviceConnectionManager {
 
       // Emit to stream for UI
       debugPrint(
-          '   📡 Emitting ${_deviceStates.length} bonded devices to deviceStatesStream',
+        '   📡 Emitting ${_deviceStates.length} bonded devices to deviceStatesStream',
       );
       for (final device in _deviceStates.values) {
         debugPrint(
-            '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}',
+          '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}',
         );
       }
       _deviceStatesController.add(Map.unmodifiable(_deviceStates));

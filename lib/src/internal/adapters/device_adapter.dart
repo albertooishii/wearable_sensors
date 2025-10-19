@@ -25,16 +25,16 @@ class DeviceAdapter {
   /// - Cada UUID se busca en el catálogo GATT para obtener metadatos completos
   /// - El dispositivo retornado incluye `discoveredServices` enriquecidos
   ///
-  /// **Saved Device Enrichment (bonded devices):**
-  /// - If [isSavedDevice] is true and [storage] is provided:
-  ///   - Try to load saved copy from storage (has discovered services)
-  ///   - Return saved copy with full services
-  ///   - If no saved copy exists, return with empty services (normal)
+  /// **Saved Device Enrichment (bonded devices only):**
+  /// - If [storage] is provided (non-null), this is a bonded device:
+  ///   - Try to load saved copy from storage (has discovered services from previous connection)
+  ///   - Return saved copy with full services if found
+  ///   - If no saved copy exists, return with empty services (normal - first time bonded)
+  /// - If [storage] is null, this is a discovered device (no storage lookup)
   ///
   /// **Note:** This is async because it needs to load GATT service metadata.
   static Future<WearableDevice> fromInternal(
     BluetoothDevice internal, {
-    bool? isSavedDevice,
     DiscoveredDeviceStorage? storage,
   }) async {
     // Detect device type from advertised services using DeviceTypesLoader
@@ -65,6 +65,8 @@ class DeviceAdapter {
     }
 
     // Crear device base
+    // ✅ isNearby: true if discovered (storage==null), false if bonded (storage!=null)
+    final isDiscovered = (storage == null);
     final baseDevice = WearableDevice(
       deviceId: internal.deviceId,
       connectionState: internal.paired
@@ -79,10 +81,8 @@ class DeviceAdapter {
       connectedAt: null,
       lastDiscoveredAt: DateTime.now(), // ✅ Mark when discovered
       discoveredServices: [], // Será enriquecido abajo
-      isSavedDevice: isSavedDevice ?? false,
       isPairedToSystem: internal.paired,
-      isNearby:
-          (isSavedDevice == false), // ✅ true for discovered, false for bonded
+      isNearby: isDiscovered, // ✅ true for discovered, false for bonded
       rssi: internal.rssi,
       requiresAuthentication: requiresAuth,
       authenticationMethod: authMethod,
@@ -98,17 +98,19 @@ class DeviceAdapter {
     }
 
     // ✅ For bonded devices, try loading saved copy with services from storage
-    if ((isSavedDevice == true) && storage != null) {
+    if (storage != null) {
       try {
         final savedCopy = await storage.getDevice(internal.deviceId);
         if (savedCopy != null && savedCopy.discoveredServices.isNotEmpty) {
           // ✅ Found saved copy with services - use it!
           return savedCopy.copyWith(
-            // Update fresh info from current scan
+            // Update fresh info from current system device
             lastSeen: DateTime.now(),
             lastDiscoveredAt: DateTime.now(),
             name: internal.name.isNotEmpty ? internal.name : savedCopy.name,
             rssi: internal.rssi,
+            isNearby:
+                false, // ✅ Bonded devices are never "nearby" (not discovered)
           );
         }
       } catch (e) {

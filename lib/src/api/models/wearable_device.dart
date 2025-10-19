@@ -59,7 +59,6 @@ class WearableDevice {
               .whereType<GattService>()
               .toList() ??
           const [],
-      isSavedDevice: json['isSavedDevice'] as bool? ?? false,
       isPairedToSystem: json['isPairedToSystem'] as bool? ?? false,
       isNearby: json['isNearby'] as bool? ?? false,
       rssi: json['rssi'] as int?,
@@ -81,7 +80,6 @@ class WearableDevice {
     this.connectedAt,
     this.lastDiscoveredAt,
     this.discoveredServices = const [],
-    this.isSavedDevice = false,
     this.isPairedToSystem = false,
     this.isNearby = false,
     this.rssi,
@@ -104,7 +102,6 @@ class WearableDevice {
       lastDiscoveredAt; // ✅ NEW: When device services were discovered and saved
   final List<GattService>
       discoveredServices; // ✅ GATT Service objects descubiertos en conexión
-  final bool isSavedDevice;
   final bool isPairedToSystem;
   final bool isNearby; // ✅ NEW: True if currently discovered during active scan
   final int? rssi; // Signal strength
@@ -173,7 +170,6 @@ class WearableDevice {
     final DateTime? connectedAt,
     final DateTime? lastDiscoveredAt,
     final List<GattService>? discoveredServices, // ✅ GATT Services actualizados
-    final bool? isSavedDevice,
     final bool? isPairedToSystem,
     final bool? isNearby,
     final int? rssi,
@@ -193,7 +189,6 @@ class WearableDevice {
       connectedAt: connectedAt ?? this.connectedAt,
       lastDiscoveredAt: lastDiscoveredAt ?? this.lastDiscoveredAt,
       discoveredServices: discoveredServices ?? this.discoveredServices,
-      isSavedDevice: isSavedDevice ?? this.isSavedDevice,
       isPairedToSystem: isPairedToSystem ?? this.isPairedToSystem,
       isNearby: isNearby ?? this.isNearby,
       rssi: rssi ?? this.rssi,
@@ -218,7 +213,6 @@ class WearableDevice {
       'connectedAt': connectedAt?.toIso8601String(),
       'lastDiscoveredAt': lastDiscoveredAt?.toIso8601String(),
       'discoveredServices': discoveredServices.map((s) => s.toJson()).toList(),
-      'isSavedDevice': isSavedDevice,
       'isPairedToSystem': isPairedToSystem,
       'isNearby': isNearby,
       'rssi': rssi,
@@ -335,7 +329,6 @@ class WearableDevice {
         connectedAt == other.connectedAt &&
         // ❌ NOT comparing: lastDiscoveredAt (reference only, not identity)
         discoveredServices.length == other.discoveredServices.length &&
-        isSavedDevice == other.isSavedDevice &&
         isPairedToSystem == other.isPairedToSystem &&
         isNearby == other.isNearby &&
         rssi == other.rssi &&
@@ -357,7 +350,6 @@ class WearableDevice {
       // ❌ NOT hashing: lastSeen, lastDataTimestamp
       connectedAt,
       discoveredServices.length,
-      isSavedDevice,
       isPairedToSystem,
       isNearby,
       rssi,
