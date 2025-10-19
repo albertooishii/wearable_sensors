@@ -1245,6 +1245,67 @@ class BleService {
     }
   }
 
+  /// 🔧 HELPER: Resolver dispositivo, servicio y característica (CONSOLIDADO)
+  ///
+  /// Centraliza la lógica compartida entre readCharacteristic() y writeCharacteristic().
+  /// Evita ~80 líneas de código duplicado.
+  ///
+  /// **Parámetros:**
+  /// - [deviceId]: ID del dispositivo BLE
+  /// - [serviceUuid]: UUID del servicio (puede ser corto)
+  /// - [characteristicUuid]: UUID de la característica (puede ser corto)
+  ///
+  /// **Retorna:**
+  /// - Tupla (device, characteristic) si todo fue encontrado
+  /// - Lanza excepción si falla
+  Future<(fbp.BluetoothDevice, fbp.BluetoothCharacteristic)>
+      _resolveDeviceServiceCharacteristic({
+    required final String deviceId,
+    required final String serviceUuid,
+    required final String characteristicUuid,
+  }) async {
+    // Paso 1: Obtener dispositivo conectado
+    final device = _connectedDevices[deviceId];
+    if (device == null) {
+      throw Exception('Device not connected: $deviceId');
+    }
+
+    // Paso 2: Obtener servicios (con cache)
+    List<fbp.BluetoothService> services;
+    if (_discoveredServices.containsKey(deviceId)) {
+      services = _discoveredServices[deviceId]!;
+    } else {
+      services = await device.discoverServices();
+      _discoveredServices[deviceId] = services;
+      debugPrint(
+        '🔍 Discovered and cached ${services.length} services for $deviceId',
+      );
+    }
+
+    // Paso 3: Buscar servicio (con normalización UUID)
+    final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
+    final service = services.firstWhere(
+      (final s) =>
+          _normalizeUuidForComparison(s.uuid.toString()) ==
+          normalizedServiceTarget,
+      orElse: () => throw Exception('Service not found: $serviceUuid'),
+    );
+
+    // Paso 4: Buscar característica (con normalización UUID)
+    final normalizedCharTarget = _normalizeUuidForComparison(
+      characteristicUuid,
+    );
+    final characteristic = service.characteristics.firstWhere(
+      (final c) =>
+          _normalizeUuidForComparison(c.uuid.toString()) ==
+          normalizedCharTarget,
+      orElse: () =>
+          throw Exception('Characteristic not found: $characteristicUuid'),
+    );
+
+    return (device, characteristic);
+  }
+
   /// Read data from a BLE characteristic (one-shot read)
   ///
   /// Performs a single read operation from a BLE characteristic.
@@ -1277,43 +1338,12 @@ class BleService {
     required final String characteristicUuid,
   }) async {
     try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) {
-        debugPrint('❌ Device not connected: $deviceId');
-        return null;
-      }
-
-      // 🔧 OPTIMIZACIÓN: Usar cache de servicios o descubrir solo si no están en cache
-      List<fbp.BluetoothService> services;
-      if (_discoveredServices.containsKey(deviceId)) {
-        services = _discoveredServices[deviceId]!;
-      } else {
-        services = await device.discoverServices();
-        _discoveredServices[deviceId] = services; // Cache para futuros reads
-        debugPrint(
-          '🔍 Discovered and cached ${services.length} services for $deviceId',
-        );
-      }
-
-      // Find service (with UUID normalization)
-      final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
-      final service = services.firstWhere(
-        (final s) =>
-            _normalizeUuidForComparison(s.uuid.toString()) ==
-            normalizedServiceTarget,
-        orElse: () => throw Exception('Service not found: $serviceUuid'),
-      );
-
-      // Find characteristic (with UUID normalization)
-      final normalizedCharTarget = _normalizeUuidForComparison(
-        characteristicUuid,
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (final c) =>
-            _normalizeUuidForComparison(c.uuid.toString()) ==
-            normalizedCharTarget,
-        orElse: () =>
-            throw Exception('Characteristic not found: $characteristicUuid'),
+      // 🔧 REFACTORIZADO: Usar helper consolidado
+      final (device, characteristic) =
+          await _resolveDeviceServiceCharacteristic(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
       );
 
       // ✅ Read characteristic value
@@ -1350,43 +1380,12 @@ class BleService {
         false, // ✅ NUEVO: soporte para WRITE_NO_RESPONSE
   }) async {
     try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) {
-        debugPrint('❌ Device not connected: $deviceId');
-        return false;
-      }
-
-      // 🔧 OPTIMIZACIÓN: Usar cache de servicios o descubrir solo si no están en cache
-      List<fbp.BluetoothService> services;
-      if (_discoveredServices.containsKey(deviceId)) {
-        services = _discoveredServices[deviceId]!;
-      } else {
-        services = await device.discoverServices();
-        _discoveredServices[deviceId] = services; // Cache para futuros writes
-        debugPrint(
-          '🔍 Discovered and cached ${services.length} services for $deviceId',
-        );
-      }
-
-      // Find service (with UUID normalization)
-      final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
-      final service = services.firstWhere(
-        (final s) =>
-            _normalizeUuidForComparison(s.uuid.toString()) ==
-            normalizedServiceTarget,
-        orElse: () => throw Exception('Service not found: $serviceUuid'),
-      );
-
-      // Find characteristic (with UUID normalization)
-      final normalizedCharTarget = _normalizeUuidForComparison(
-        characteristicUuid,
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (final c) =>
-            _normalizeUuidForComparison(c.uuid.toString()) ==
-            normalizedCharTarget,
-        orElse: () =>
-            throw Exception('Characteristic not found: $characteristicUuid'),
+      // 🔧 REFACTORIZADO: Usar helper consolidado
+      final (device, characteristic) =
+          await _resolveDeviceServiceCharacteristic(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
       );
 
       // ✅ ACTUALIZADO: Usar writeWithoutResponse si es necesario
@@ -1433,33 +1432,12 @@ class BleService {
     required final Duration timeout,
   }) async {
     try {
-      final device = _connectedDevices[deviceId];
-      if (device == null) {
-        debugPrint('❌ Device not connected: $deviceId');
-        return null;
-      }
-
-      final services = await device.discoverServices();
-
-      // Find service (with UUID normalization)
-      final normalizedServiceTarget = _normalizeUuidForComparison(serviceUuid);
-      final service = services.firstWhere(
-        (final s) =>
-            _normalizeUuidForComparison(s.uuid.toString()) ==
-            normalizedServiceTarget,
-        orElse: () => throw Exception('Service not found: $serviceUuid'),
-      );
-
-      // Find characteristic (with UUID normalization)
-      final normalizedCharTarget = _normalizeUuidForComparison(
-        characteristicUuid,
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (final c) =>
-            _normalizeUuidForComparison(c.uuid.toString()) ==
-            normalizedCharTarget,
-        orElse: () =>
-            throw Exception('Characteristic not found: $characteristicUuid'),
+      // 🔧 REFACTORIZADO: Usar helper consolidado
+      final (device, characteristic) =
+          await _resolveDeviceServiceCharacteristic(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
       );
 
       // Wait for notification
