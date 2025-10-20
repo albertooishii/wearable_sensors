@@ -456,14 +456,37 @@ class WearableSensors {
     _ensureInitialized();
 
     try {
-      // Disconnect if currently connected
+      debugPrint('🗑️ [FORGET_DEVICE] Starting forget process for $deviceId');
+
+      // 1. Disconnect if currently connected
       final connectionState = _instance!._manager.getConnectionState(deviceId);
       if (connectionState?.isConnected ?? false) {
+        debugPrint('   → Disconnecting device...');
         await _instance!._manager.disconnectDevice(deviceId);
+        debugPrint('   ✅ Device disconnected');
       }
 
-      // Remove stored credentials
+      // 2. Remove stored credentials
+      debugPrint('   → Removing credentials from storage...');
       await _instance!._storage.removeCredentials(deviceId);
+      debugPrint('   ✅ Credentials removed');
+
+      // 3. ✨ NUEVO: Update device state in memory
+      // Set isPairedToSystem = false so stream filters it out
+      debugPrint('   → Updating device state in memory...');
+      final device = _instance!._manager.deviceStates[deviceId];
+      if (device != null) {
+        final updatedDevice = device.copyWith(
+          isPairedToSystem: false,
+          requiresAuthentication: false,
+        );
+        _instance!._manager.updateDeviceState(deviceId, updatedDevice);
+        debugPrint('   ✅ Device state updated: isPairedToSystem=false');
+      } else {
+        debugPrint('   ⚠️  Device not found in memory, skipping state update');
+      }
+
+      debugPrint('✅ [FORGET_DEVICE] Complete: $deviceId is now forgotten');
     } catch (e, stackTrace) {
       throw WearableException(
         'Failed to forget device $deviceId: $e',
@@ -1363,7 +1386,7 @@ class WearableSensors {
     // ✅ UPDATE device state: credentials saved → requiresAuthentication=false
     // This notifies the connection manager that the device no longer needs auth
     try {
-      _instance?._manager.updateDeviceAuthenticationState(
+      await _instance?._manager.updateDeviceAuthenticationState(
         deviceId,
         requiresAuthentication: false,
       );

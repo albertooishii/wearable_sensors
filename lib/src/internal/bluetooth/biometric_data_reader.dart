@@ -811,27 +811,29 @@ class BiometricDataReader {
       return _deviceImplCache[deviceId]!;
     }
 
-    // ✅ First, try to get device type from DeviceConnectionManager
-    // The connection manager tracks DeviceState which includes deviceTypeId
-    final deviceState = _connectionManager.deviceStates[deviceId];
-    if (deviceState != null && deviceState.deviceTypeId != 'unknown') {
-      debugPrint(
-        '   🔍 Retrieved device type from DeviceState: ${deviceState.deviceTypeId}',
-      );
-      try {
-        final deviceImpl = await DeviceImplementationLoader.load(
-          deviceState.deviceTypeId,
-        );
-        _deviceImplCache[deviceId] = deviceImpl;
-        debugPrint('   📱 Device type: ${deviceImpl.deviceType}');
+    // ✅ CRITICAL: Get the actual device implementation ID (NOT UI type)
+    // The active orchestrator knows the technical implementation (e.g., xiaomi_smart_band_10)
+    // This is DIFFERENT from deviceTypeId which is for UI (e.g., xiaomi_mi_band)
+    final orchestrator = _connectionManager.activeConnections[deviceId];
+    if (orchestrator != null) {
+      final implId = orchestrator.discoveredDeviceTypeId;
+      if (implId != null && implId != 'unknown') {
         debugPrint(
-          '   🔐 Auth protocol: ${deviceImpl.authentication.protocol}',
+          '   🔍 Retrieved implementation ID from orchestrator: $implId',
         );
-        return deviceImpl;
-      } on Exception catch (e) {
-        debugPrint(
-          '   ⚠️  Failed to load device type from state: $e, falling back to generic',
-        );
+        try {
+          final deviceImpl = await DeviceImplementationLoader.load(implId);
+          _deviceImplCache[deviceId] = deviceImpl;
+          debugPrint('   📱 Device implementation: ${deviceImpl.deviceType}');
+          debugPrint(
+            '   🔐 Auth protocol: ${deviceImpl.authentication.protocol}',
+          );
+          return deviceImpl;
+        } on Exception catch (e) {
+          debugPrint(
+            '   ⚠️  Failed to load implementation $implId: $e',
+          );
+        }
       }
     }
 

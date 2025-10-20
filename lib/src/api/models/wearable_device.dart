@@ -158,6 +158,36 @@ class WearableDevice {
     }
   }
 
+  // ============================================================
+  // 🎯 COMPUTED STATE GETTERS FOR UI LOGIC
+  // ============================================================
+
+  /// ✅ Can this device be forgotten?
+  /// Device can be forgotten if it's paired to system (bonded)
+  bool get canForget => isPairedToSystem;
+
+  /// ✅ Is device in a transitional state (cannot be interrupted)?
+  /// Transitional states: connecting, authenticating
+  bool get isTransitioning =>
+      connectionState == ConnectionState.connecting ||
+      connectionState == ConnectionState.authenticating;
+
+  /// ✅ Can this device be disconnected?
+  /// Device can disconnect if connected or streaming
+  bool get canDisconnect =>
+      connectionState == ConnectionState.connected ||
+      connectionState == ConnectionState.streaming;
+
+  /// ✅ Can this device be connected/reconnected?
+  /// Device can reconnect if disconnected or in error state
+  bool get canConnect =>
+      connectionState == ConnectionState.disconnected ||
+      connectionState == ConnectionState.error;
+
+  /// ✅ Does device need authentication?
+  /// Alias for UI clarity
+  bool get needsAuthentication => requiresAuthentication;
+
   /// Copy with updated fields
   WearableDevice copyWith({
     final String? name,

@@ -425,24 +425,39 @@ class DeviceConnectionManager {
       debugPrint('✅ [DCM] connectAndAuthenticate() COMPLETED successfully');
       debugPrint('═══════════════════════════════════════════════════');
 
-      // 7. ✅ Update device state with discovered device type
-      // This is set during orchestrator initialization and ensures
-      // BiometricDataReader can use it even in SPP mode (no BLE services)
+      // 7. ✨ NUEVO: Check if device was bonded during authentication
+      // (Xiaomi does bonding during auth via prepareDeviceWithBonding)
+      final isBondedNow = await _bleService.isDeviceBonded(deviceId);
+      if (isBondedNow) {
+        debugPrint('   ✅ Device is now bonded at system level');
+        debugPrint('   → Updating device state: isPairedToSystem = true');
+
+        // Get current device state and update isPairedToSystem
+        final currentDevice = _deviceStates[deviceId];
+        if (currentDevice != null) {
+          final updatedDevice = currentDevice.copyWith(
+            isPairedToSystem: true,
+          );
+          _deviceStates[deviceId] = updatedDevice;
+          _deviceStatesController.add(Map.unmodifiable(_deviceStates));
+          debugPrint('   ✅ Emitted updated state with isPairedToSystem=true');
+        }
+      }
+
+      // ✅ IMPORTANT: DO NOT update deviceTypeId with internal implementation ID
+      // discoveredDeviceTypeId (e.g., 'xiaomi_smart_band_10') is an INTERNAL wearable_sensors
+      // technical detail for connection/authentication configuration.
+      // It should NEVER be exposed to dream_incubator UI layer.
+      // The deviceTypeId must remain as the original UI type (e.g., 'xiaomi_mi_band')
+      // that was set during device discovery/enumeration.
+
       debugPrint('🔍 [DCM] After successful connectAndAuthenticate:');
       debugPrint(
-        '   - orchestrator.discoveredDeviceTypeId: ${orchestrator.discoveredDeviceTypeId}',
+        '   - Preserving deviceTypeId: ${_deviceStates[deviceId]?.deviceTypeId}',
       );
-      if (orchestrator.discoveredDeviceTypeId != null) {
-        debugPrint(
-          '   ✅ Updating deviceTypeId to: ${orchestrator.discoveredDeviceTypeId}',
-        );
-        _updateDeviceState(
-          deviceId,
-          deviceTypeId: orchestrator.discoveredDeviceTypeId,
-        );
-      } else {
-        debugPrint('   ⚠️ discoveredDeviceTypeId is null, skipping update');
-      }
+      debugPrint(
+        '   - Internal implementation: ${orchestrator.discoveredDeviceTypeId}',
+      );
 
       // ✅ Orchestrator already stored in _activeConnections before subscriptions
       // (see step 4 above - moved before subscribing for stream emission)
@@ -667,6 +682,11 @@ class DeviceConnectionManager {
           // Fallback: create basic device without enrichment
           // Detect if bonded at system level even on error
           final isBondedAtSystemLevel = btDevice.paired;
+          // 🔥 CRITICAL: Preserve deviceTypeId from in-memory state if available
+          final existingDevice = _deviceStates[deviceId];
+          final preservedDeviceTypeId =
+              existingDevice?.deviceTypeId ?? 'unknown';
+
           final basicDevice = WearableDevice(
             deviceId: deviceId,
             name: btDevice.name,
@@ -677,10 +697,14 @@ class DeviceConnectionManager {
                 !isBondedAtSystemLevel, // ✅ false if bonded, true if just discovered
             discoveredServices: [],
             lastDiscoveredAt: DateTime.now(),
+            deviceTypeId: preservedDeviceTypeId,
           );
           _deviceStates[deviceId] = basicDevice;
           debugPrint(
             '   📌 Created fallback device (bonded=$isBondedAtSystemLevel) for $deviceId',
+          );
+          debugPrint(
+            '      - Preserved deviceTypeId: $preservedDeviceTypeId',
           );
         }
 
@@ -755,6 +779,11 @@ class DeviceConnectionManager {
             '   ⚠️  Error enriching device ${btDevice.deviceId}: $e',
           );
           // Fallback: create basic device without enrichment
+          // 🔥 CRITICAL: Preserve deviceTypeId from in-memory state if available
+          final existingDevice = _deviceStates[btDevice.deviceId];
+          final preservedDeviceTypeId =
+              existingDevice?.deviceTypeId ?? 'unknown';
+
           wearableDevices.add(
             WearableDevice(
               deviceId: btDevice.deviceId,
@@ -763,7 +792,11 @@ class DeviceConnectionManager {
               connectionState: ConnectionState.disconnected,
               isPairedToSystem: true,
               discoveredServices: [],
+              deviceTypeId: preservedDeviceTypeId,
             ),
+          );
+          debugPrint(
+            '      - Preserved deviceTypeId: $preservedDeviceTypeId',
           );
         }
       }
@@ -1033,6 +1066,12 @@ class DeviceConnectionManager {
           debugPrint('   ⚠️  Error enriching device ${btDevice.deviceId}: $e');
           debugPrint('   Stack trace: $stackTrace');
           // Fallback: create basic device without enrichment
+          // 🔥 CRITICAL: Preserve deviceTypeId from in-memory state if available
+          // (Device might have been connected before and has a valid type cached)
+          final existingDevice = _deviceStates[btDevice.deviceId];
+          final preservedDeviceTypeId =
+              existingDevice?.deviceTypeId ?? 'unknown';
+
           final basicDevice = WearableDevice(
             deviceId: btDevice.deviceId,
             name: btDevice.name,
@@ -1040,10 +1079,14 @@ class DeviceConnectionManager {
             connectionState: ConnectionState.disconnected,
             isPairedToSystem: true,
             discoveredServices: [],
+            deviceTypeId: preservedDeviceTypeId,
           );
           _deviceStates[btDevice.deviceId] = basicDevice;
           debugPrint(
             '   📌 Created fallback basic device for ${btDevice.deviceId}',
+          );
+          debugPrint(
+            '      - Preserved deviceTypeId: $preservedDeviceTypeId',
           );
         }
       }
@@ -1069,14 +1112,55 @@ class DeviceConnectionManager {
   ///
   /// Called by WearableSensors.saveDeviceCredentials() to notify that
   /// credentials have been saved and requiresAuthentication should be false.
-  void updateDeviceAuthenticationState(
+  Future<void> updateDeviceAuthenticationState(
     final String deviceId, {
     required final bool requiresAuthentication,
-  }) {
+  }) async {
+    // Update in-memory state first so UI reacts immediately
     _updateDeviceState(
       deviceId,
       requiresAuthentication: requiresAuthentication,
     );
+
+    // Also persist the updated auth flag in discovered device storage
+    // so the value survives app restarts. This is best-effort: failures
+    // shouldn't break the saved credentials flow.
+    try {
+      if (_discoveredDeviceStorage != null) {
+        // Try to find an existing saved copy (prefers storage copy if present)
+        final saved = await _discoveredDeviceStorage!.getDevice(deviceId);
+
+        // If we don't have a saved copy but have an in-memory entry, use it
+        final inMemory = _deviceStates[deviceId];
+        final base = saved ?? inMemory;
+
+        if (base != null) {
+          final toSave =
+              base.copyWith(requiresAuthentication: requiresAuthentication);
+          await _discoveredDeviceStorage!.saveDevice(toSave);
+          debugPrint(
+            '✅ Persisted requiresAuthentication=$requiresAuthentication for $deviceId',
+          );
+        } else {
+          debugPrint(
+            'ℹ️ No saved/in-memory device to persist auth state for $deviceId',
+          );
+        }
+      }
+    } catch (e, st) {
+      debugPrint('⚠️ Failed to persist auth state for $deviceId: $e');
+      debugPrint('$st');
+      // Non-fatal: the credentials themselves were already saved by caller
+    }
+  }
+
+  /// ✨ PUBLIC: Update a device state directly and emit to stream
+  ///
+  /// Used by forgetDevice() to mark device as unpaired.
+  void updateDeviceState(String deviceId, WearableDevice updatedDevice) {
+    _deviceStates[deviceId] = updatedDevice;
+    _deviceStatesController.add(Map.unmodifiable(_deviceStates));
+    debugPrint('🔄 Device state updated and emitted: $deviceId');
   }
 
   void _updateDeviceState(
