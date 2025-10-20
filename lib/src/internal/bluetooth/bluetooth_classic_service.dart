@@ -166,6 +166,11 @@ class BluetoothClassicService {
       // Store connection
       _connections[deviceAddress] = connection;
 
+      // ✅ FIX: Cancel any existing subscription BEFORE creating new one
+      // Prevents duplicate data when connect() is called multiple times
+      // (e.g., retry logic in xiaomi_connection_orchestrator)
+      await _dataSubscriptions[deviceAddress]?.cancel();
+
       // Set up data stream listener for this device
       _dataSubscriptions[deviceAddress] = connection.input!.listen(
         (final Uint8List data) {

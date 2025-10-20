@@ -3,12 +3,36 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // 🔌 Xiaomi Connection Orchestrator - Dream Incubator
-// Orchestrates complete Xiaomi device connection flow: BLE→BT_CLASSIC→Streaming
+//
+// ========================================================
+// CRITICAL ARCHITECTURE: BLE vs BT_CLASSIC Paths
+// ========================================================
+//
+// **Xiaomi Protocol (Xiaomi Smart Band 10, etc.):**
+//
+// AUTHENTICATION PHASE (First time only):
+//  1. BLE connect + 3-step handshake → Encryption keys obtained
+//  2. Keys saved to persistent storage
+//  3. Device paired at system level
+//
+// DATA STREAMING PHASE (All subsequent connections):
+//  1. Skip BLE entirely
+//  2. Connect directly via BT_CLASSIC (no BLE)
+//  3. Use saved encryption keys for NONCE handshake
+//  4. Stream biometric data
+//
+// KEY INSIGHT:
+// - BLE auth generates encryption keys (happens ONCE)
+// - Once keys exist: NEVER use BLE again
+// - ALWAYS use BT_CLASSIC for reconnections (faster, simpler)
+// - NO fallback BLE if BT_CLASSIC fails (circuit breaker pattern)
 //
 // Workflow:
-// 1. BLE authentication via XiaomiAuthService
-// 2. Disconnect BLE
-// 3. Connect BT_CLASSIC for data streaming
+// 1. Check if encryption keys exist + device bonded
+//    → YES: Direct BT_CLASSIC (with retry logic, NO BLE)
+//    → NO:  BLE authentication → save keys → transition BT_CLASSIC
+// 2. Disconnect BLE (if used)
+// 3. Start BT_CLASSIC streaming
 // 4. Initialize XiaomiSppService with BtClassicSppTransport
 // 5. Start biometric data streaming
 
@@ -163,13 +187,21 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
       final isBonded = await _bleService.isDeviceBonded(deviceId);
 
       if (_encryptionKeys != null && isBonded) {
-        // Device authenticated before AND bonded → Skip BLE auth, connect directly
+        // ✅ PATH 1: KNOWN DEVICE (Authenticated before)
+        // - Encryption keys exist (from previous auth)
+        // - Device bonded at system level
+        // - Decision: Skip BLE ENTIRELY, connect directly via BT_CLASSIC
+        // - Retry logic: Only BT_CLASSIC retries, NO fallback to BLE
+        //
+        // Why? BLE auth is expensive and unnecessary. Keys are already saved.
+        // For every reconnection, use BT_CLASSIC directly.
         debugPrint(
-          '✅ Device has saved encryption keys (authenticated previously)',
+          '✅ [PATH 1: KNOWN DEVICE] Encryption keys exist (authenticated previously)',
         );
         debugPrint('   ✅ Encryption keys loaded from storage');
+        debugPrint('   🚫 SKIPPING BLE auth entirely');
         debugPrint(
-          '   → Skipping BLE auth, connecting directly via BT_CLASSIC',
+          '   → Connecting directly via BT_CLASSIC (fast path, no BLE overhead)',
         );
 
         // ✅ CRITICAL: Load credentials IMMEDIATELY for NONCE handshake
@@ -180,23 +212,33 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
 
         // 3. Direct BT_CLASSIC connection (no BLE transition needed)
         //    → Never connected via BLE, so skip disconnect/wait
-        //    → Connect directly with retry logic
+        //    → Connect directly with retry logic (only BT_CLASSIC, no BLE fallback)
         await _connectBtClassicDirect(deviceId);
       } else {
-        // No encryption keys OR not bonded → Need full BLE authentication
+        // ✅ PATH 2: NEW DEVICE (First time authentication required)
+        // - No encryption keys found
+        // - Decision: Perform full BLE authentication to obtain keys
+        // - Then: Transition to BT_CLASSIC for data streaming
+        // - Future: All reconnections will use PATH 1 (BT_CLASSIC direct)
         if (isBonded) {
           debugPrint(
-            '⚠️ Device bonded at system level but no encryption keys found',
+            '✅ [PATH 2: REAUTH] Device bonded at system level but no keys found',
           );
-          debugPrint('   → Will re-authenticate via BLE to obtain fresh keys');
+          debugPrint(
+              '   → Situation: Keys were deleted, need to re-authenticate');
         } else {
-          debugPrint('⚠️ Device not bonded - first time connection');
+          debugPrint(
+              '✅ [PATH 2: FIRST_TIME] Device not bonded - first connection');
         }
 
         // 2. BLE Authentication Phase (required for first-time devices)
+        // This establishes trust with the device and generates encryption keys
+        debugPrint('🔐 Starting BLE authentication (one-time only)');
         await _authenticateViaBle(deviceId);
 
         // 3. Transition to BT_CLASSIC Phase (after successful BLE auth)
+        // From now on, all reconnections will use PATH 1 (BT_CLASSIC direct)
+        debugPrint('🔄 Transitioning from BLE to BT_CLASSIC for streaming');
         await _transitionToBtClassic(deviceId);
       }
 
@@ -281,11 +323,30 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
     }
   }
 
-  /// Direct BT_CLASSIC connection (NO BLE transition)
-  /// Used when device is known and we skip BLE authentication
-  /// Includes automatic retry logic for timing issues
+  /// Direct BT_CLASSIC connection (NO BLE transition, NO BLE fallback)
+  ///
+  /// Used when device is known and we skip BLE authentication.
+  /// This path is taken when encryption keys already exist.
+  ///
+  /// **CRITICAL:** Only attempts BT_CLASSIC, NEVER falls back to BLE.
+  /// Reason: BLE auth is expensive and already completed before (keys are saved).
+  /// If BT_CLASSIC fails, it indicates a real connectivity issue that should
+  /// be surfaced to user, not hidden by retrying with different protocols.
+  ///
+  /// Includes automatic retry logic for timing/transient issues (BT_CLASSIC only).
   Future<void> _connectBtClassicDirect(final String deviceId) async {
-    debugPrint('🔄 Phase 2: Direct BT_CLASSIC Connection (Known Device Path)');
+    debugPrint(
+      '═══════════════════════════════════════════════════',
+    );
+    debugPrint(
+      '🔄 Phase 2: Direct BT_CLASSIC Connection (Known Device Path)',
+    );
+    debugPrint(
+      '   CRITICAL: BLE skipped (keys exist). BT_CLASSIC only, no fallback.',
+    );
+    debugPrint(
+      '═══════════════════════════════════════════════════',
+    );
 
     const maxRetries = 3;
     const retryDelayMs = 500; // 500ms between retries
@@ -299,20 +360,40 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
         await _btClassicService.connect(deviceId);
         debugPrint('   ✅ SUCCESS: BT_CLASSIC connected on attempt $attempt');
         _updateState(ConnectionState.connected);
+        debugPrint(
+          '═══════════════════════════════════════════════════',
+        );
         return;
       } on Exception catch (e) {
         debugPrint('   ⚠️ Attempt $attempt failed: $e');
 
         if (attempt < maxRetries) {
-          debugPrint('   ⏳ Retrying in ${retryDelayMs}ms...');
+          debugPrint('   ⏳ Retrying BT_CLASSIC in ${retryDelayMs}ms...');
+          debugPrint(
+            '   (Skipping BLE fallback - keys exist, BLE not needed)',
+          );
           await Future.delayed(const Duration(milliseconds: retryDelayMs));
           attempt++;
         } else {
-          debugPrint('═══════════════════════════════════════════════════');
-          debugPrint('❌ FAILURE: Direct BT_CLASSIC connection failed');
+          debugPrint(
+            '═══════════════════════════════════════════════════',
+          );
+          debugPrint(
+            '❌ FAILURE: BT_CLASSIC connection failed (no BLE fallback)',
+          );
           debugPrint('   All $maxRetries attempts exhausted');
-          debugPrint('   Error: $e');
-          debugPrint('═══════════════════════════════════════════════════');
+          debugPrint(
+            '   Last error: $e',
+          );
+          debugPrint(
+            '   NOTE: BLE fallback disabled for known devices.',
+          );
+          debugPrint(
+            '   If this persists, consider: 1) Reboot device, 2) Re-pair (clear keys)',
+          );
+          debugPrint(
+            '═══════════════════════════════════════════════════',
+          );
           rethrow;
         }
       }

@@ -12,8 +12,7 @@ import 'package:wearable_sensors/src/internal/models/biometric_sample.dart';
 // Note: xiaomi_fe95_parsers.dart re-exports generic parsers, so we don't need
 // to import generic_parsers.dart separately
 import 'xiaomi_fe95/xiaomi_fe95_parsers.dart';
-import 'xiaomi_spp/battery_parser.dart'; // SPP protobuf parsers (Mi Band 9/10)
-import 'xiaomi_spp/realtime_stats_parser.dart'; // SPP realtime stats (HR, movement)
+import 'xiaomi_spp/xiaomi_spp_parsers.dart'; // SPP protobuf parsers (Mi Band 9/10)
 
 // Future devices:
 // import 'polar_h10/polar_h10_parsers.dart';

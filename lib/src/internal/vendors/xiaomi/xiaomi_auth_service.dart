@@ -267,7 +267,12 @@ class XiaomiAuthService {
   static const _cmdNonce = 26;
   static const _cmdAuth = 27;
   static const _healthCommandType = 8;
-  static const _cmdConfigHeartRateSet = 11;
+  // ✨ REALTIME STATS COMMANDS (Xiaomi Mi Band 9/10 - Gadgetbridge XiaomiHealthService.java)
+  // OLD: static const _cmdConfigHeartRateSet = 11; // Only CONFIGURES HR, doesn't stream
+  static const _cmdRealtimeStatsStart =
+      45; // ← START sending realtime data (THE FIX!)
+  // Future use: static const _cmdRealtimeStatsStop = 46; // STOP sending realtime data
+  // For parsing: static const _cmdRealtimeStatsEvent = 47; // Data events (received from device)
 
   /// Iniciar proceso de autenticación
   ///
@@ -2026,9 +2031,9 @@ class XiaomiAuthService {
       );
       await Future.delayed(const Duration(milliseconds: 100));
 
-      // ✅ NUEVO: Configurar HR monitoring automáticamente para realtime stats
-      // Esto habilita el hardware de HR necesario para los botones "Start HR"
-      await _setHeartRateMonitoringConfig();
+      // ✨ CRITICAL FIX: Start realtime stats (subtype=45) instead of just configuring (subtype=11)
+      // This tells the device to BEGIN STREAMING sensor data
+      await _startRealtimeStats();
       await Future.delayed(const Duration(milliseconds: 100));
 
       await _sendCommand(
@@ -2072,48 +2077,52 @@ class XiaomiAuthService {
     }
   }
 
-  /// Configure heart rate monitoring for realtime stats
+  /// 🎯 START REALTIME STATS - Critical for heart rate data!
   ///
-  /// Enables continuous HR monitoring on the device, which is required
-  /// for realtime stats (type=8, subtype=45) to work properly.
+  /// **THIS WAS THE BUG:** We were sending subtype=11 (CONFIG_HEART_RATE_SET)
+  /// which only CONFIGURES the HR monitoring but does NOT enable data streaming.
   ///
-  /// Based on Gadgetbridge's XiaomiHealthService.setHeartRateConfig()
+  /// Sends subtype=45 (START_REALTIME_STATS) to tell the device to BEGIN
+  /// transmitting realtime sensor data (type=8, subtype=47 events at ~1Hz).
   ///
-  /// **Why this is needed:**
-  /// - The Mi Band requires HR monitoring to be enabled before responding
-  ///   to realtime stats requests
-  /// - Without this, the "Start HR" button sends commands but device doesn't
-  ///   send subtype=47 events (realtime data)
-  /// - Gadgetbridge always sends this during initialization
+  /// Based on Gadgetbridge's XiaomiHealthService.enableRealtimeStats():
+  /// ```java
+  /// public void enableRealtimeStats(final boolean enable) {
+  ///     getSupport().sendCommand(
+  ///         "realtime data",
+  ///         XiaomiProto.Command.newBuilder()
+  ///             .setType(8)  // COMMAND_TYPE
+  ///             .setSubtype(enable ? 45 : 46)  // START or STOP
+  ///             .build()
+  ///     );
+  /// }
+  /// ```
   ///
-  /// **Configuration:**
-  /// - disabled: false (enable monitoring)
-  /// - interval: 1 minute (balance accuracy vs battery, 0=smart, 1/10/30 min)
-  /// - unknown7: 1 (required flag from Gadgetbridge)
-  Future<void> _setHeartRateMonitoringConfig() async {
-    debugPrint('   📊 Configuring HR monitoring for realtime stats...');
+  /// **Without this command:**
+  /// ❌ Device is configured to monitor HR (subtype=11)
+  /// ❌ But device NEVER sends subtype=47 events
+  /// ❌ "Waiting for data..." timeout forever
+  ///
+  /// **With this command:**
+  /// ✅ Device starts sending subtype=47 events (~1/sec)
+  /// ✅ Parser extracts heart rate and other sensors
+  /// ✅ UI displays real data
+  Future<void> _startRealtimeStats() async {
+    debugPrint('   🎯 STARTING REALTIME STATS (type=8, subtype=45)...');
+    debugPrint('   📝 This tells device to BEGIN streaming sensor data!');
 
     try {
-      // Build HeartRate protobuf message
-      // Based on Gadgetbridge XiaomiHealthService lines 520-555
-      // Proto fields: xiaomi.proto lines 525-533
-      final heartRate = pb.HeartRate()
-        ..disabled = false // Enable HR monitoring (NOT disabled)
-        ..interval = 1 // 1 minute intervals (0=smart, 1, 10, 30 valid)
-        ..unknown7 = 1; // Required by Gadgetbridge (unknown purpose)
+      // ✨ CRITICAL FIX: Use subtype=45 (START_REALTIME_STATS), NOT 11!
+      // Subtype 11 = CONFIG (device doesn't stream)
+      // Subtype 45 = START (device streams subtype=47 events)
 
-      // Wrap in Health message
-      final health = pb.Health()..heartRate = heartRate;
-
-      // Build command (type=8, subtype=11)
       final command = pb.Command()
-        ..type = _healthCommandType // Health command type
-        ..subtype = _cmdConfigHeartRateSet // CMD_CONFIG_HEART_RATE_SET
-        ..health = health;
+        ..type = _healthCommandType // Health command type = 8
+        ..subtype = _cmdRealtimeStatsStart; // ✨ CORRECTED: 45 instead of 11
 
       // Send via SPP V2 handler (encrypted)
       if (_sppVersion == SppProtocolVersion.v2 && _sppV2Handler != null) {
-        debugPrint('   📤 Sending HR config command (encrypted)');
+        debugPrint('   📤 Sending START_REALTIME_STATS command (encrypted)');
         final payload = command.writeToBuffer();
         await _sppV2Handler!.sendData(
           deviceId,
@@ -2121,14 +2130,17 @@ class XiaomiAuthService {
           payload: payload,
           encrypted: true, // Post-auth commands must be encrypted
         );
-        debugPrint('   ✅ HR monitoring configured successfully');
+        debugPrint(
+            '   ✅ REALTIME STATS STARTED - Device should now stream data!');
       } else {
-        debugPrint('   ⚠️ SPP V2 handler not available, skipping HR config');
+        debugPrint(
+            '   ⚠️ SPP V2 handler not available, skipping realtime start');
       }
     } on Exception catch (e) {
       // Non-critical: Log but don't fail initialization
-      debugPrint('   ⚠️ Failed to configure HR monitoring: $e');
-      debugPrint('   ℹ️  Realtime stats may not work until manually enabled');
+      debugPrint('   ⚠️ Failed to start realtime stats: $e');
+      debugPrint(
+          '   ℹ️  Device data streaming may not work until manually enabled');
     }
   }
 

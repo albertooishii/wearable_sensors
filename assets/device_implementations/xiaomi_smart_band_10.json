@@ -10,25 +10,6 @@
             "uuid": "0000FE95-0000-1000-8000-00805F9B34FB",
             "name": "Xiaomi Encrypted Service",
             "characteristics": {
-                "heart_rate_measurement": {
-                    "uuid": "00002A37-0000-1000-8000-00805F9B34FB",
-                    "parser": "heart_rate_measurement",
-                    "data_type": "heart_rate",
-                    "properties": [
-                        "notify"
-                    ]
-                },
-                "battery_level": {
-                    "uuid": "00002A19-0000-1000-8000-00805F9B34FB",
-                    "parser": "battery_level",
-                    "data_type": "battery",
-                    "properties": [
-                        "read",
-                        "notify"
-                    ],
-                    "disabled": true,
-                    "note": "❌ DISABLED: Xiaomi Smart Band 10 does NOT support BLE characteristic reads after BT_CLASSIC SPP connection is established. Device is encrypted only on SPP channel. Use SPP protocol instead (XiaomiSppService via protobuf command)"
-                },
                 "device_info": {
                     "uuid": "00000050-0000-1000-8000-00805F9B34FB",
                     "properties": [
@@ -42,7 +23,7 @@
                         "write_no_response",
                         "notify"
                     ],
-                    "description": "Xiaomi SPP Protocol V2 - RX characteristic for receiving responses FROM Smart Band 10 (Gadgetbridge: BLE_V2_CHARACTERISTIC_RX). Note: Has both write and notify properties."
+                    "description": "Xiaomi SPP Protocol V2 - AUTH ONLY: RX characteristic for receiving auth responses during BLE authentication phase"
                 },
                 "command_write": {
                     "uuid": "0000005F-0000-1000-8000-00805F9B34FB",
@@ -50,74 +31,12 @@
                         "write_no_response",
                         "notify"
                     ],
-                    "description": "Xiaomi SPP Protocol V2 - TX characteristic for sending commands TO Smart Band 10 (Gadgetbridge: BLE_V2_CHARACTERISTIC_TX). Note: Has both write and notify properties."
-                },
-                "activity_data": {
-                    "uuid": "00000053-0000-1000-8000-00805F9B34FB",
-                    "parser": "xiaomi_activity_data",
-                    "data_type": "movement",
-                    "properties": [
-                        "notify"
-                    ],
-                    "description": "Activity data stream - includes steps, movement intensity, SpO2 (polled every 60 seconds)",
-                    "polling_interval_seconds": 60
-                },
-                "realtime_steps": {
-                    "uuid": "00000007-0000-3512-2118-0009AF100700",
-                    "parser": "xiaomi_realtime_steps",
-                    "data_type": "movement",
-                    "properties": [
-                        "notify",
-                        "read"
-                    ],
-                    "description": "Real-time step counter (updates every 1-5 seconds)"
-                }
-            }
-        },
-        "FEE1": {
-            "uuid": "0000FEE1-0000-1000-8000-00805F9B34FB",
-            "name": "Xiaomi Extended Service",
-            "characteristics": {
-                "spo2_data": {
-                    "uuid": "00000005-0000-3512-2118-0009AF100700",
-                    "parser": "xiaomi_activity_file",
-                    "data_type": "spo2",
-                    "properties": [
-                        "notify"
-                    ],
-                    "description": "SpO2 samples from activity files (polled every 60-300 seconds depending on all-day monitoring setting)",
-                    "polling_interval_seconds": 300
+                    "description": "Xiaomi SPP Protocol V2 - AUTH ONLY: TX characteristic for sending auth commands during BLE authentication phase"
                 }
             }
         }
     },
-    "data_parsers": {
-        "xiaomi_heart_rate": {
-            "type": "heart_rate",
-            "class": "GenericHeartRateParser",
-            "description": "Standard BLE Heart Rate Measurement (0x2A37) - REUSES generic parser"
-        },
-        "xiaomi_battery_level": {
-            "type": "battery",
-            "class": "GenericBatteryLevelParser",
-            "description": "Standard BLE Battery Level (0x2A19) - REUSES generic parser"
-        },
-        "xiaomi_activity_data": {
-            "type": "movement",
-            "class": "XiaomiActivityDataParser",
-            "description": "Xiaomi activity stream - steps, intensity, ENMO. Polled every 60s during monitoring."
-        },
-        "xiaomi_realtime_steps": {
-            "type": "movement",
-            "class": "XiaomiRealtimeStepsParser",
-            "description": "Real-time step counter - total steps. Updates every 1-5s when movement detected."
-        },
-        "xiaomi_spo2": {
-            "type": "spo2",
-            "class": "XiaomiSpo2Parser",
-            "description": "⚠️ NOT IMPLEMENTED YET - SpO2 from activity files. Requires authentication."
-        }
-    },
+    "data_parsers": {},
     "authentication": {
         "protocol": "xiaomi_spp",
         "connection_type": "spp_over_ble",
@@ -125,6 +44,7 @@
         "command_read_uuid": "0000005E-0000-1000-8000-00805F9B34FB",
         "command_write_uuid": "0000005F-0000-1000-8000-00805F9B34FB",
         "encryption_required": true,
+        "data_reading_note": "⚠️ After authentication completes, BLE connection DISCONNECTS and switches to BT_CLASSIC/SPP. All data reading (battery, sensors, etc.) happens via BT_CLASSIC/SPP only. BLE characteristics above are ONLY used during the AUTH phase.",
         "spp_protocol": {
             "version": "v2",
             "version_detection": {

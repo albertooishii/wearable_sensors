@@ -220,8 +220,8 @@ class BiometricDataReader {
   ///
   /// **Routing automático**:
   /// 1. Load device implementation JSON
-  /// 2. Check if sensorType has BLE characteristic → subscribe via BLE
-  /// 3. Else check if device supports SPP streaming → subscribe via SPP (futuro)
+  /// 2. ✅ PRIORITIZE SPP for Xiaomi devices (NEVER fallback to BLE)
+  /// 3. Check if sensorType has BLE characteristic → subscribe via BLE (non-SPP only)
   /// 4. Parse cada notificación con ParserRegistry
   ///
   /// **Ejemplo**:
@@ -231,7 +231,7 @@ class BiometricDataReader {
   ///   print('HR: ${sample.value} BPM');
   /// });
   ///
-  /// // Xiaomi Band 8: activity_data streaming via BLE
+  /// // Xiaomi Band 8: activity_data streaming via SPP ONLY
   /// reader.subscribe('AA:BB:CC:DD:EE:FF', SensorType.movement).listen((sample) {
   ///   print('Movement: ${sample.value}');
   /// });
@@ -247,17 +247,33 @@ class BiometricDataReader {
       // 1. Load device implementation
       final deviceImpl = await _getDeviceImplementation(deviceId);
 
-      // 2. Route según transport
+      // 2. ✅ PRIORITIZE SPP for encrypted devices (Xiaomi Band 9/10)
+      // SPP devices are always connected via BT_CLASSIC when ready for streaming.
+      // ❌ NEVER attempt BLE for SPP devices - causes connection conflicts
+      if (deviceImpl.authentication.protocol.startsWith('xiaomi_spp')) {
+        // ✅ SPP path (Xiaomi Mi Band 9/10)
+        debugPrint(
+          '   → Transport: BT_CLASSIC SPP (${deviceImpl.authentication.protocol}) [PRIORITIZED]',
+        );
+        // Subscribe to realtime stats and filter by sensor type
+        yield* subscribeToRealtimeStats(deviceId).where((sample) {
+          // Filter only samples matching this sensorType
+          return sample.sensorType == sensorType;
+        });
+        return; // ✅ CRITICAL: Return immediately - NO BLE fallback for SPP devices
+      }
+
+      // 3. Fallback: Check for BLE characteristic (non-SPP devices only)
       final charInfo = deviceImpl.getCharacteristicForDataType(dataType);
 
       if (charInfo != null) {
-        // ✅ BLE streaming path
+        // ✅ BLE streaming path (for non-SPP devices)
         debugPrint(
           '   → Transport: BLE streaming (characteristic ${charInfo.characteristicUuid})',
         );
         yield* _subscribeViaBle(deviceId, charInfo);
       } else {
-        // ❌ Unsupported (SPP streaming no implementado aún)
+        // ❌ Unsupported
         throw UnsupportedError(
           'Streaming for "$dataType" not supported on $deviceId',
         );

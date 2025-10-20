@@ -10,66 +10,24 @@
             "uuid": "0000FE95-0000-1000-8000-00805F9B34FB",
             "name": "Xiaomi Encrypted Service",
             "characteristics": {
-                "heart_rate_measurement": {
-                    "uuid": "00002A37-0000-1000-8000-00805F9B34FB",
-                    "parser": "heart_rate_measurement",
-                    "data_type": "heart_rate",
-                    "properties": [
-                        "notify"
-                    ]
-                },
-                "battery_level": {
-                    "uuid": "00002A19-0000-1000-8000-00805F9B34FB",
-                    "parser": "battery_level",
-                    "data_type": "battery",
-                    "properties": [
-                        "read",
-                        "notify"
-                    ]
-                },
                 "command_write": {
                     "uuid": "00000051-0000-1000-8000-00805F9B34FB",
                     "properties": [
                         "write_no_response"
                     ],
-                    "description": "Xiaomi SPP Protocol V1 - TX characteristic for sending commands TO Smart Band 9"
+                    "description": "Xiaomi SPP Protocol V1 - AUTH ONLY: TX characteristic for sending auth commands during BLE authentication phase"
                 },
                 "command_read": {
                     "uuid": "00000052-0000-1000-8000-00805F9B34FB",
                     "properties": [
                         "notify"
                     ],
-                    "description": "Xiaomi SPP Protocol V1 - RX characteristic for receiving responses FROM Smart Band 9"
-                },
-                "activity_data": {
-                    "uuid": "00000053-0000-1000-8000-00805F9B34FB",
-                    "parser": "xiaomi_activity_data",
-                    "data_type": "movement",
-                    "properties": [
-                        "notify"
-                    ],
-                    "description": "Activity data stream - includes steps, movement intensity"
+                    "description": "Xiaomi SPP Protocol V1 - AUTH ONLY: RX characteristic for receiving auth responses during BLE authentication phase"
                 }
             }
         }
     },
-    "data_parsers": {
-        "xiaomi_heart_rate": {
-            "type": "heart_rate",
-            "class": "GenericHeartRateParser",
-            "description": "Standard BLE Heart Rate Measurement (0x2A37) - REUSES generic parser"
-        },
-        "xiaomi_battery_level": {
-            "type": "battery",
-            "class": "GenericBatteryLevelParser",
-            "description": "Standard BLE Battery Level (0x2A19) - REUSES generic parser"
-        },
-        "xiaomi_activity_data": {
-            "type": "movement",
-            "class": "XiaomiActivityDataParser",
-            "description": "Xiaomi activity stream - steps, intensity, ENMO"
-        }
-    },
+    "data_parsers": {},
     "authentication": {
         "protocol": "xiaomi_spp",
         "connection_type": "spp_over_ble",
@@ -77,6 +35,7 @@
         "command_read_uuid": "00000052-0000-1000-8000-00805F9B34FB",
         "command_write_uuid": "00000051-0000-1000-8000-00805F9B34FB",
         "encryption_required": true,
+        "data_reading_note": "⚠️ After authentication completes, BLE connection DISCONNECTS. All data reading (battery, sensors, etc.) happens via BT_CLASSIC/SPP only. BLE characteristics above are ONLY used during the AUTH phase.",
         "spp_protocol": {
             "version": "v1",
             "version_detection": {
