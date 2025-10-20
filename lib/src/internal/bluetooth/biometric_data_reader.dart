@@ -352,8 +352,9 @@ class BiometricDataReader {
   /// **Nota**: Usar [subscribeToRealtimeStats] para recibir los datos.
   Future<void> enableRealtimeStats(
     final String deviceId,
-    final bool enable,
-  ) async {
+    final bool enable, {
+    final SensorType? sensorType,
+  }) async {
     // ✅ AUTO-DISCOVERY: Obtener SPP service del orchestrator
     final sppService = _getSppServiceForDevice(deviceId);
 
@@ -372,10 +373,12 @@ class BiometricDataReader {
       if (enable) {
         // 🎯 **CRITICAL FIX (User Discovery)**:
         // Device requires CONFIG_HEART_RATE_SET (subtype=11) BEFORE START_REALTIME_STATS (subtype=45)
+        // **BUT ONLY for Heart Rate sensor!**
         //
         // **Evidence from logs**:
         // - Post-auth init WORKS: sends CONFIG (11) → then START (45) → device streams
         // - Manual activation FAILS: only sends START (45) → device ignores it
+        // - Steps/other sensors: should only send START (45), not CONFIG (11)
         //
         // **Payload**: This is the EXACT CONFIG sent during post-auth initialization:
         // Hex: 08 08 10 0b 52 18 42 16 08 00 10 00 18 00 20 00 2a 02 08 00 38 01 42 04 08 00 10 00 48 02
@@ -384,63 +387,73 @@ class BiometricDataReader {
         // - subtype=11 (CONFIG_HEART_RATE_SET)
         // - Health message with continuous mode parameters
 
-        debugPrint(
-          '🔄 [enableRealtimeStats] Preparing device for HR streaming...',
-        );
-        debugPrint(
-          '   📤 STEP 1: Sending CONFIG_HEART_RATE_SET (subtype=11)...',
-        );
+        final isHeartRate =
+            sensorType == SensorType.heartRate || sensorType == null;
 
-        // Step 1: Send CONFIG command (fire-and-forget, like post-auth does)
-        try {
-          final configPayload = Uint8List.fromList([
-            0x08,
-            0x08,
-            0x10,
-            0x0b,
-            0x52,
-            0x18,
-            0x42,
-            0x16,
-            0x08,
-            0x00,
-            0x10,
-            0x00,
-            0x18,
-            0x00,
-            0x20,
-            0x00,
-            0x2a,
-            0x02,
-            0x08,
-            0x00,
-            0x38,
-            0x01,
-            0x42,
-            0x04,
-            0x08,
-            0x00,
-            0x10,
-            0x00,
-            0x48,
-            0x02,
-          ]);
-
-          final configCommand = pb.Command.fromBuffer(configPayload);
-          await sppService.sendProtobufCommand(
-            command: configCommand,
-            expectsResponse: false, // Fire-and-forget
-          );
-          debugPrint('   ✅ CONFIG sent successfully');
-        } catch (e) {
+        if (isHeartRate) {
           debugPrint(
-            '   ⚠️  CONFIG send failed: $e (continuing with START anyway...)',
+            '🔄 [enableRealtimeStats] Preparing device for HR streaming...',
           );
-        }
+          debugPrint(
+            '   📤 STEP 1: Sending CONFIG_HEART_RATE_SET (subtype=11)...',
+          );
 
-        // Wait for device to process CONFIG
-        debugPrint('   ⏱️  Waiting 150ms for device to process CONFIG...');
-        await Future.delayed(const Duration(milliseconds: 150));
+          // Step 1: Send CONFIG command (fire-and-forget, like post-auth does)
+          try {
+            final configPayload = Uint8List.fromList([
+              0x08,
+              0x08,
+              0x10,
+              0x0b,
+              0x52,
+              0x18,
+              0x42,
+              0x16,
+              0x08,
+              0x00,
+              0x10,
+              0x00,
+              0x18,
+              0x00,
+              0x20,
+              0x00,
+              0x2a,
+              0x02,
+              0x08,
+              0x00,
+              0x38,
+              0x01,
+              0x42,
+              0x04,
+              0x08,
+              0x00,
+              0x10,
+              0x00,
+              0x48,
+              0x02,
+            ]);
+
+            final configCommand = pb.Command.fromBuffer(configPayload);
+            await sppService.sendProtobufCommand(
+              command: configCommand,
+              expectsResponse: false, // Fire-and-forget
+            );
+            debugPrint('   ✅ CONFIG sent successfully');
+          } catch (e) {
+            debugPrint(
+              '   ⚠️  CONFIG send failed: $e (continuing with START anyway...)',
+            );
+          }
+
+          // Wait for device to process CONFIG
+          debugPrint('   ⏱️  Waiting 150ms for device to process CONFIG...');
+          await Future.delayed(const Duration(milliseconds: 150));
+        } else {
+          debugPrint(
+            '🔄 [enableRealtimeStats] Preparing device for ${sensorType.displayName} streaming...',
+          );
+          debugPrint('   ⏭️  Skipping CONFIG (only needed for HR)');
+        }
 
         // Step 2: Send START command
         debugPrint(
@@ -454,7 +467,7 @@ class BiometricDataReader {
         );
 
         debugPrint('   ✅ START sent successfully');
-        debugPrint('   📊 Device should now stream HR data (subtype=47)');
+        debugPrint('   📊 Device should now stream data (subtype=47)');
 
         // Wait for device to prepare streaming
         debugPrint('   ⏱️  Waiting 200ms for device to prepare streaming...');
@@ -462,7 +475,7 @@ class BiometricDataReader {
         debugPrint('   ✅ Device ready for streaming!');
       } else {
         // STOP: Just send the STOP command
-        debugPrint('🔄 [enableRealtimeStats] Stopping HR streaming...');
+        debugPrint('🔄 [enableRealtimeStats] Stopping streaming...');
         debugPrint('   📤 Sending STOP_REALTIME_STATS (subtype=46)...');
 
         final stopCommand = createRealtimeStatsStopRequest();

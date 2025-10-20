@@ -995,7 +995,12 @@ class WearableSensors {
         debugPrint(
           '🎯 [streamMultiple] AUTO-ACTIVATING realtime stats for $deviceId',
         );
-        await _instance!._reader.enableRealtimeStats(deviceId, true);
+        // Pass heartRate as sensorType because CONFIG is only needed for HR
+        await _instance!._reader.enableRealtimeStats(
+          deviceId,
+          true,
+          sensorType: SensorType.heartRate,
+        );
         debugPrint('   ✅ Realtime stats enabled - device will start streaming');
       } catch (e) {
         // Non-Xiaomi device or already enabled - continue anyway
@@ -1080,7 +1085,8 @@ class WearableSensors {
         debugPrint(
           '🛑 [streamMultiple] AUTO-DEACTIVATING realtime stats for $deviceId',
         );
-        await _instance!._reader.enableRealtimeStats(deviceId, false);
+        await _instance!._reader.enableRealtimeStats(deviceId, false,
+            sensorType: SensorType.heartRate);
         debugPrint('   ✅ Realtime stats disabled - device will stop streaming');
       } catch (e) {
         debugPrint(
@@ -1141,7 +1147,8 @@ class WearableSensors {
         debugPrint(
           '🎯 [stream] AUTO-ACTIVATING realtime stats for $deviceId (${sensorType.name})',
         );
-        await _instance!._reader.enableRealtimeStats(deviceId, true);
+        await _instance!._reader
+            .enableRealtimeStats(deviceId, true, sensorType: sensorType);
         debugPrint('   ✅ Realtime stats enabled - device will start streaming');
       } catch (e) {
         // Non-Xiaomi device or already enabled - continue anyway
@@ -1180,7 +1187,8 @@ class WearableSensors {
         debugPrint(
           '🛑 [stream] AUTO-DEACTIVATING realtime stats for $deviceId (${sensorType.name})',
         );
-        await _instance!._reader.enableRealtimeStats(deviceId, false);
+        await _instance!._reader
+            .enableRealtimeStats(deviceId, false, sensorType: sensorType);
         debugPrint('   ✅ Realtime stats disabled - device will stop streaming');
       } catch (e) {
         debugPrint(
