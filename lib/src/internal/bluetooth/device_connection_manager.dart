@@ -355,10 +355,25 @@ class DeviceConnectionManager {
       final orchestrator = await _createOrchestrator(vendor);
 
       // 4. Initialize device state
-      _deviceStates[deviceId] = WearableDevice(
-        deviceId: deviceId,
-        connectionState: ConnectionState.disconnected,
-      );
+      // 🔴 CRITICAL FIX: Preserve existing device state (isPairedToSystem, isNearby, etc.)
+      // If device is bonded, it's already in _deviceStates with enriched data
+      // Use copyWith() to preserve these fields, only update connectionState to disconnected
+      final existingDevice = _deviceStates[deviceId];
+      if (existingDevice != null) {
+        _deviceStates[deviceId] = existingDevice.copyWith(
+          connectionState: ConnectionState.disconnected,
+        );
+        debugPrint(
+          '   ✅ Preserved bonded device state: isPaired=${existingDevice.isPairedToSystem}, isNearby=${existingDevice.isNearby}',
+        );
+      } else {
+        // Device not in _deviceStates yet (new discovered device)
+        _deviceStates[deviceId] = WearableDevice(
+          deviceId: deviceId,
+          connectionState: ConnectionState.disconnected,
+        );
+        debugPrint('   📝 Created new device state for new discovery');
+      }
 
       // 🔴 FIX: Add orchestrator to _activeConnections BEFORE subscribing
       // This ensures that when state changes come in, _activeConnections is populated
