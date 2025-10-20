@@ -27,6 +27,7 @@ import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_connection_o
 import 'package:wearable_sensors/src/internal/models/bluetooth_device.dart';
 import 'package:wearable_sensors/src/internal/utils/xiaomi_device_detection.dart';
 import 'package:wearable_sensors/src/internal/adapters/device_adapter.dart';
+import 'package:wearable_sensors/src/internal/bluetooth/enriched_device_scanner.dart';
 import '../storage/discovered_device_storage.dart';
 
 /// Vendor detection result
@@ -74,6 +75,17 @@ class DeviceConnectionManager {
 
   // Storage for discovered devices (bonded device enrichment)
   DiscoveredDeviceStorage? _discoveredDeviceStorage;
+
+  // Enriched device scanner (for connecting to discovered devices to read services)
+  EnrichedDeviceScanner? _enrichedDeviceScanner;
+
+  // Stream subscription for enriched device results
+  StreamSubscription<WearableDevice>? _enrichedDeviceScannerSubscription;
+
+  // ✅ CRÍTICO: Flag para bloquear raw BLE stream cuando EnrichedScanner está activo
+  // Cuando enrich=true, SOLO EnrichedDeviceScanner debe emitir devices
+  // El raw stream NO debe agregar devices sin enriquecer
+  bool _isEnrichedScanActive = false;
 
   // Stream controller for device states (UI consumption)
   final StreamController<Map<String, WearableDevice>> _deviceStatesController =
@@ -168,6 +180,114 @@ class DeviceConnectionManager {
 
     _isInitialized = true;
     debugPrint('✅ DeviceConnectionManager initialized');
+  }
+
+  /// Start a discovery scan with enrichment
+  ///
+  /// This method:
+  /// 1. Starts BLE discovery scan (passive, no connection)
+  /// 2. Initializes EnrichedDeviceScanner to listen for discovered devices
+  /// 3. For each discovered device:
+  ///    - Connects to it
+  ///    - Discovers GATT services
+  ///    - Reads battery level
+  ///    - Auto-detects device type
+  ///    - Disconnects
+  /// 4. Emits fully enriched devices to deviceStatesStream
+  ///
+  /// **Usage:**
+  /// ```dart
+  /// // From Device Settings UI - "Scan for devices" button
+  /// await DeviceConnectionManager.instance.startDiscoveryScan();
+  /// ```
+  Future<void> startDiscoveryScan({
+    Duration scanDuration = const Duration(seconds: 15),
+    int parallelism = 2,
+    Duration enrichmentTimeout = const Duration(seconds: 7),
+  }) async {
+    if (!_isInitialized) {
+      throw Exception('DeviceConnectionManager not initialized');
+    }
+
+    debugPrint('🔍 Starting discovery scan with enrichment...');
+
+    // ✅ SET FLAG: Block raw BLE stream, only EnrichedScanner emits
+    _isEnrichedScanActive = true;
+    debugPrint(
+      '🔒 [DiscoveryScan] Blocking raw BLE stream - only EnrichedScanner will emit',
+    );
+
+    // Stop any previous scanner
+    if (_enrichedDeviceScanner != null) {
+      debugPrint('⏹️  Stopping previous scanner...');
+      await _enrichedDeviceScanner!.stop();
+      await _enrichedDeviceScannerSubscription?.cancel();
+    }
+
+    // Create new scanner
+    _enrichedDeviceScanner = EnrichedDeviceScanner(
+      bleService: _bleService,
+      discoveredDevicesStream: _bleService.rawBleDevicesStream,
+      duration: scanDuration,
+      parallelism: parallelism,
+      enrichmentTimeout: enrichmentTimeout,
+    );
+
+    // Listen to enriched device results
+    _enrichedDeviceScannerSubscription =
+        _enrichedDeviceScanner!.resultsStream.listen(
+      (enrichedDevice) {
+        debugPrint(
+          '🎁 [DiscoveryScan] Enriched device: ${enrichedDevice.name} '
+          '(${enrichedDevice.discoveredServices.length} services)',
+        );
+
+        // ✅ ONLY emit if fully enriched (has services OR is bonded)
+        // Never emit unenriched discovered devices with 0 services
+        if (enrichedDevice.discoveredServices.isNotEmpty ||
+            enrichedDevice.isPairedToSystem) {
+          // Update device state with enriched version
+          _deviceStates[enrichedDevice.deviceId] = enrichedDevice;
+
+          // Emit updated device states
+          _deviceStatesController.add(Map.unmodifiable(_deviceStates));
+          debugPrint(
+            '   ✅ Emitted enriched: ${enrichedDevice.discoveredServices.length} services',
+          );
+        } else {
+          debugPrint(
+            '   ⚠️  SKIPPED: Device has no services and not bonded',
+          );
+        }
+      },
+      onError: (error) {
+        debugPrint('❌ [DiscoveryScan] Error: $error');
+      },
+      onDone: () {
+        debugPrint('✅ [DiscoveryScan] Discovery scan completed');
+        // ✅ RESET FLAG: Re-enable raw BLE stream
+        _isEnrichedScanActive = false;
+        debugPrint('🔓 [DiscoveryScan] Re-enabling raw BLE stream');
+      },
+    );
+
+    // Start the scanner (which listens to rawBleDevicesStream from BLE scan)
+    await _enrichedDeviceScanner!.start();
+    debugPrint('🔍 EnrichedDeviceScanner started');
+
+    // Now start the actual BLE scan
+    // The scanner will listen to rawBleDevicesStream as devices are discovered
+    try {
+      await _bleService.startScanning(timeout: scanDuration);
+      debugPrint('📡 BLE scan started (${scanDuration.inSeconds}s timeout)');
+    } catch (e) {
+      debugPrint('❌ Failed to start BLE scan: $e');
+      // Stop scanner if BLE scan fails
+      _isEnrichedScanActive = false; // ✅ Reset flag on error
+      await _enrichedDeviceScanner!.stop();
+      await _enrichedDeviceScannerSubscription?.cancel();
+      rethrow;
+    }
   }
 
   /// Connect to a device (vendor detection automatic)
@@ -461,47 +581,92 @@ class DeviceConnectionManager {
   ///
   /// **Enrichment:** Each discovered device is enriched using DeviceAdapter
   /// which includes service UUIDs, device type detection, and auth method detection.
+  ///
+  /// **CRITICAL:** When `_isEnrichedScanActive=true`, this stream SKIPS processing
+  /// discovered devices. Only EnrichedDeviceScanner emits devices during enriched scans.
+  /// This prevents raw unenriched devices from appearing before enrichment completes.
   Stream<BluetoothDevice> get discoveredDevicesStream {
     return _bleService.rawBleDevicesStream.asyncMap((btDevice) async {
       final deviceId = btDevice.deviceId;
+
+      // ✅ BLOQUEAR: Si hay EnrichedScanner activo, no procesar raw devices
+      // Solo EnrichedDeviceScanner debe emitir durante scan(enrich: true)
+      if (_isEnrichedScanActive) {
+        debugPrint(
+          '⏸️  [discoveredDevicesStream] BLOCKED - EnrichedScanner is active for $deviceId',
+        );
+        return btDevice; // Return without processing
+      }
 
       debugPrint(
         '🔍 [discoveredDevicesStream] Processing: ${btDevice.name} ($deviceId)',
       );
 
+      // 🔥 FIX: Check if device is already in _deviceStates AND is bonded
+      // If yes, DON'T overwrite - just update the already-bonded device
+      // This prevents losing bonded devices when they re-appear in scans
+      if (_deviceStates.containsKey(deviceId)) {
+        final existingDevice = _deviceStates[deviceId]!;
+
+        if (existingDevice.isPairedToSystem) {
+          debugPrint(
+            '   ℹ️  Device already bonded in _deviceStates, skipping to preserve bonded status',
+          );
+          return btDevice; // Don't process further
+        } else {
+          debugPrint(
+            '   ⚠️  Device exists but NOT bonded - might be from previous scan, updating...',
+          );
+        }
+      }
+
       // Only process if not already in _deviceStates (avoid duplicates)
       if (!_deviceStates.containsKey(deviceId)) {
         debugPrint('   🆕 New device, enriching...');
         try {
+          // 🔥 FIX: Check if device is bonded at SYSTEM LEVEL
+          // Even if it comes from scan (discoveredDevicesStream), we need to
+          // pass storage if it's a bonded device so DeviceAdapter forces isPaired=true
+          final isBondedAtSystemLevel = btDevice.paired;
+          final storage =
+              isBondedAtSystemLevel ? _discoveredDeviceStorage : null;
+
+          debugPrint(
+            '   🔍 btDevice.paired=$isBondedAtSystemLevel, storage=${storage != null ? "provided" : "null"}',
+          );
+
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
-          // storage: null = discovered device (no saved copy lookup)
+          // storage: provided if bonded, null if just discovered
           final enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
-            storage: null,
+            storage: storage,
           );
           _deviceStates[deviceId] = enrichedDevice;
-          debugPrint('   ✅ Enriched discovered device: ${btDevice.name}');
+          debugPrint('   ✅ Enriched device: ${btDevice.name}');
           debugPrint(
-            '      - Services: ${enrichedDevice.discoveredServices.length}',
+            '      - isPaired=${enrichedDevice.isPairedToSystem}, services=${enrichedDevice.discoveredServices.length}',
           );
         } catch (e, stackTrace) {
           debugPrint('   ⚠️  Error enriching device $deviceId: $e');
           debugPrint('   Stack trace: $stackTrace');
           // Fallback: create basic device without enrichment
-          // ⚠️ Only emit if enrichment fails AND device type is unsupported
-          // This ensures we don't emit broken devices
+          // Detect if bonded at system level even on error
+          final isBondedAtSystemLevel = btDevice.paired;
           final basicDevice = WearableDevice(
             deviceId: deviceId,
             name: btDevice.name,
             macAddress: deviceId,
             connectionState: ConnectionState.disconnected,
-            isPairedToSystem: false,
-            isNearby: true, // ✅ Always true for discovered devices
+            isPairedToSystem: isBondedAtSystemLevel, // ✅ Use system bond status
+            isNearby:
+                !isBondedAtSystemLevel, // ✅ false if bonded, true if just discovered
             discoveredServices: [],
             lastDiscoveredAt: DateTime.now(),
           );
           _deviceStates[deviceId] = basicDevice;
-          debugPrint('   📌 Created fallback basic device for $deviceId');
+          debugPrint(
+            '   📌 Created fallback device (bonded=$isBondedAtSystemLevel) for $deviceId',
+          );
         }
 
         // Emit updated deviceStates to UI
@@ -982,6 +1147,15 @@ class DeviceConnectionManager {
   /// Dispose all resources
   Future<void> dispose() async {
     debugPrint('🧹 Disposing DeviceConnectionManager...');
+
+    // Stop enriched device scanner
+    if (_enrichedDeviceScanner != null) {
+      await _enrichedDeviceScanner!.stop();
+      await _enrichedDeviceScanner!.dispose();
+    }
+
+    // Cancel enriched device scanner subscription
+    await _enrichedDeviceScannerSubscription?.cancel();
 
     // Cancel all stream subscriptions
     for (final deviceId in _streamSubscriptions.keys.toList()) {

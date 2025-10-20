@@ -191,11 +191,20 @@ class EnrichedDeviceScanner {
 
     debugPrint('📱 Discovered: $name (${device.deviceId})');
 
-    // Skip duplicates
+    // ✅ CRITICAL: Skip if already emitted OR IN PROGRESS (by same or different name)
+    // Prevents multiple enrichments of the same MAC address
+    // Use MAC (deviceId) as stable identifier, not name (which can change)
     if (_emittedDeviceIds.contains(device.deviceId)) {
-      debugPrint('   ⏭️  Already processed, skipping');
+      debugPrint(
+        '   ⏭️  Already processed (MAC: ${device.deviceId}), skipping',
+      );
       return;
     }
+
+    // 🔒 MARK AS IN PROGRESS IMMEDIATELY to prevent duplicate enrichments
+    // This is critical because enrichment is async and same MAC can advertise
+    // with different names during BLE scan
+    _emittedDeviceIds.add(device.deviceId);
 
     // Add to enrichment queue
     _enrichmentQueue.add(device);
@@ -290,7 +299,7 @@ class EnrichedDeviceScanner {
           );
 
           // ✅ EMIT bonded device even with no services
-          _emittedDeviceIds.add(deviceId);
+          // (deviceId already in _emittedDeviceIds since _onDeviceDiscovered())
           _discoveredSoFar.add(partialDevice);
           if (!_resultsController.isClosed) {
             _resultsController.add(partialDevice);
@@ -338,7 +347,7 @@ class EnrichedDeviceScanner {
       }
 
       // ✅ EMIT enriched device (guaranteed to have services)
-      _emittedDeviceIds.add(deviceId);
+      // (deviceId already in _emittedDeviceIds since _onDeviceDiscovered())
       _discoveredSoFar.add(enrichedDevice);
 
       if (!_resultsController.isClosed) {

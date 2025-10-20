@@ -108,12 +108,15 @@ class DeviceAdapter {
         final savedCopy = await storage.getDevice(internal.deviceId);
         if (savedCopy != null && savedCopy.discoveredServices.isNotEmpty) {
           // ✅ Found saved copy with services - use it!
+          // 🔥 CRITICAL: Force isPairedToSystem=true for bonded devices
+          // (saved copy might have isPairedToSystem=false if discovered during scan)
           return savedCopy.copyWith(
             // Update fresh info from current system device
             lastSeen: DateTime.now(),
             lastDiscoveredAt: DateTime.now(),
             name: internal.name.isNotEmpty ? internal.name : savedCopy.name,
             rssi: internal.rssi,
+            isPairedToSystem: true, // 🔥 Force bonded status
             isNearby:
                 false, // ✅ Bonded devices are never "nearby" (not discovered)
           );

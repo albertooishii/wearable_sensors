@@ -270,6 +270,32 @@ class WearableSensors {
     );
   }
 
+  /// Get current device states synchronously.
+  ///
+  /// Returns a snapshot of all currently known devices (bonded + discovered).
+  /// Use this as `initialData` in StreamBuilder to avoid showing "Loading..." when
+  /// the user navigates to a screen that listens to [deviceStream].
+  ///
+  /// **Returns:** Map of deviceId → WearableDevice
+  ///
+  /// **Example:**
+  /// ```dart
+  /// StreamBuilder(
+  ///   stream: WearableSensors.deviceStream(filter: DeviceFilter.bonded),
+  ///   initialData: WearableSensors.deviceStates, // ✅ Avoid late subscription loss
+  ///   builder: (context, snapshot) {
+  ///     final devices = snapshot.data!;
+  ///     return ListView(
+  ///       children: devices.values.map((device) => Text(device.name ?? 'Unknown')).toList(),
+  ///     );
+  ///   },
+  /// );
+  /// ```
+  static Map<String, WearableDevice> get deviceStates {
+    _ensureInitialized();
+    return _instance!._manager.deviceStates;
+  }
+
   // ============================================================
   // DEVICE DISCOVERY
   // ============================================================
@@ -306,20 +332,67 @@ class WearableSensors {
   ///   }
   /// });
   /// ```
+  /// Start a device discovery scan
+  ///
+  /// **Parameters:**
+  /// - [duration]: How long to scan for devices (default: 10 seconds)
+  /// - [enrich]: If true, actively connects to each device to read GATT services, battery,
+  ///   and detect device type. If false, only performs passive BLE scan (faster, less
+  ///   resource intensive). Default: false
+  ///
+  /// **Behavior:**
+  /// - `enrich=false`: Passive scan, emits devices as discovered (quick but may miss services)
+  /// - `enrich=true`: Active enrichment scan, connects to each device to read full details
+  ///   (slower but devices arrive fully enriched with services and battery level)
+  ///
+  /// Devices are emitted to [deviceStream()] as they're discovered/enriched.
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Quick passive scan from background
+  /// await WearableSensors.scan(duration: Duration(seconds: 10), enrich: false);
+  ///
+  /// // Detailed enriched scan from Device Settings "Scan for devices" button
+  /// await WearableSensors.scan(duration: Duration(seconds: 15), enrich: true);
+  ///
+  /// // Listen to devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.nearby).listen((devices) {
+  ///   for (final device in devices.values) {
+  ///     print('${device.name}: ${device.discoveredServices.length} services');
+  ///   }
+  /// });
+  /// ```
   static Future<bool> scan({
     Duration duration = const Duration(seconds: 10),
+    bool enrich = false,
   }) async {
     _ensureInitialized();
 
     try {
-      debugPrint(
-        '📡 [WearableSensors] Starting background scan (${duration.inSeconds}s)',
-      );
+      if (enrich) {
+        debugPrint(
+          '🔍 [WearableSensors] Starting enriched scan (${duration.inSeconds}s)',
+        );
 
-      // Start BLE scanning in background via DeviceConnectionManager
-      await _instance!._manager.startScanning(timeout: duration);
+        // Start enriched discovery with service reading
+        await _instance!._manager.startDiscoveryScan(
+          scanDuration: duration,
+          parallelism: 2,
+          enrichmentTimeout: const Duration(seconds: 7),
+        );
 
-      debugPrint('✅ [WearableSensors] Scan started successfully');
+        debugPrint('✅ [WearableSensors] Enriched scan started successfully');
+      } else {
+        debugPrint(
+          '📡 [WearableSensors] Starting passive scan (${duration.inSeconds}s)',
+        );
+
+        // Start simple BLE scanning (passive, no enrichment)
+        await _instance!._manager.startScanning(timeout: duration);
+
+        debugPrint('✅ [WearableSensors] Scan started successfully');
+      }
+
       return true;
     } catch (e, stackTrace) {
       throw ConnectionException(
@@ -330,10 +403,6 @@ class WearableSensors {
       );
     }
   }
-
-  // ============================================================
-  // DEVICE MANAGEMENT
-  // ============================================================
 
   /// Gets list of devices that have been authenticated with this app.
   ///
@@ -696,9 +765,40 @@ class WearableSensors {
   ///
   /// **Real-time Updates:**
   /// Stream emits whenever ANY device changes (connection, battery, properties, etc.)
+  /// Streams all devices matching the filter.
+  ///
+  /// **Behavior:**
+  /// - Always returns devices if they match the filter
+  /// - If enriched (services discovered), returns full data
+  /// - If not enriched, returns basic data (name, connection state, etc.)
+  /// - For bonded devices: always returns, regardless of enrichment
+  /// - For discovered devices: returns both enriched and unenriched
+  ///
+  /// **Parameters:**
+  /// - [filter]: DeviceFilter.bonded, .nearby, or .all
+  /// - [skipUnnamed]: Skip discovered devices without valid names (default: true)
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // All devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.all).listen((devices) {
+  ///   for (final device in devices.values) {
+  ///     print('${device.name}: ${device.discoveredServices.length} services');
+  ///   }
+  /// });
+  ///
+  /// // Only bonded devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.bonded).listen((devices) {
+  ///   // Xiaomi, Tucson, etc (enriched or basic, doesn't matter)
+  /// });
+  ///
+  /// // Only discovered devices
+  /// WearableSensors.deviceStream(filter: DeviceFilter.nearby).listen((devices) {
+  ///   // Quest 3 (enriched: 5 services), Fridge (unenriched: 0 services), etc
+  /// });
+  /// ```
   static Stream<Map<String, WearableDevice>> deviceStream({
     required DeviceFilter filter,
-    bool enrich = true,
     bool skipUnnamed = true,
   }) async* {
     _ensureInitialized();
@@ -735,13 +835,10 @@ class WearableSensors {
         // For bonded devices (isPairedToSystem=true): ALWAYS show them,
         // even without names (user intentionally bonded)
 
-        // Filter by enrichment status if enrich=true
-        if (enrich && device.isNearby && !device.isPairedToSystem) {
-          // For discovered (nearby) devices, only emit if fully enriched
-          if (device.discoveredServices.isEmpty) {
-            continue; // Wait until services are discovered
-          }
-        }
+        // ✅ NO enrichment filter - return ALL devices
+        // If enriched (services discovered), data is complete
+        // If not enriched, return what we have (basic device info)
+        // This is automatic enrichment, not a filter
 
         // Device passed all filters - include it
         filtered[entry.key] = device;
