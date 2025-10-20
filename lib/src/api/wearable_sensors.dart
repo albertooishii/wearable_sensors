@@ -1153,12 +1153,9 @@ class WearableSensors {
       // Subscribe via BiometricDataReader (now uses SensorType directly)
       final sampleStream = _instance!._reader.subscribe(deviceId, sensorType);
 
-      // Track this stream for cleanup
-      final streamKey = '$deviceId:${sensorType.name}';
-      final subscription = sampleStream.listen(null);
-      _instance!._activeStreams[streamKey] = subscription;
-
       // Convert BiometricSample stream to SensorReading stream
+      // Note: We use await for (yield) - this is the ONLY way to listen to this stream
+      // Don't call .listen() separately, as streams can only be listened to once!
       await for (final sample in sampleStream) {
         yield SensorReading(
           deviceId: deviceId,
@@ -1170,9 +1167,6 @@ class WearableSensors {
           metadata: sample.metadata,
         );
       }
-
-      // Remove from active streams when done
-      _instance!._activeStreams.remove(streamKey);
     } catch (e, stackTrace) {
       throw WearableException(
         'Failed to stream ${sensorType.displayName} from $deviceId: $e',
