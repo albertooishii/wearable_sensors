@@ -49,6 +49,7 @@ import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_auth_service
 import 'xiaomi_spp_service.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_protobuf_commands.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/transport/btclassic_spp_transport.dart';
+import 'package:wearable_sensors/src/internal/vendors/xiaomi/services/xiaomi_command_service.dart';
 import 'package:wearable_sensors/src/internal/utils/device_implementation_loader.dart';
 
 /// Xiaomi-specific connection orchestrator
@@ -822,12 +823,70 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
     final Map<String, dynamic>? params,
   }) async {
     if (_sppService == null) {
-      throw Exception('SPP service not initialized');
+      throw Exception('SPP service not initialized for sendCommand');
     }
 
-    // TODO: Implement command sending via XiaomiSppService
-    debugPrint('📤 Sending command: $command with params: $params');
-    // await _sppService!.sendCommand(...);
+    debugPrint(
+      '📤 [Xiaomi Orchestrator] Sending command: $command with params: $params',
+    );
+
+    final commandService = XiaomiCommandService(
+      deviceId: deviceId,
+      sppService: _sppService,
+    );
+
+    try {
+      switch (command) {
+        case 'clock':
+          // value: DateTime, metadata: {timezone: String}
+          final dateTime = params?['value'] as DateTime?;
+          final timezone = params?['timezone'] as String?;
+          await commandService.syncClock(
+            dateTime: dateTime,
+            timezone: timezone,
+          );
+          break;
+
+        case 'language':
+          // value: String (language code), metadata: {locale: String}
+          final languageCode = params?['value'] as String?;
+          final locale = params?['locale'] as String?;
+          if (languageCode == null) {
+            throw ArgumentError(
+                'language command requires value (language code)');
+          }
+          await commandService.setLanguage(
+            languageCode: languageCode,
+            locale: locale,
+          );
+          break;
+
+        case 'vibration':
+          // value: List<Map<String, int>>
+          final vibrationPattern = params?['value'] as List<Map<String, int>>?;
+          final repeat = params?['repeat'] as int? ?? 1;
+          if (vibrationPattern == null || vibrationPattern.isEmpty) {
+            throw ArgumentError(
+              'vibration command requires value (vibration pattern)',
+            );
+          }
+          await commandService.sendVibrationTest(
+            vibrationPattern: vibrationPattern,
+            repeat: repeat,
+          );
+          break;
+
+        default:
+          throw UnimplementedError('Command not supported: $command');
+      }
+
+      debugPrint('✅ Command sent successfully: $command');
+    } catch (e) {
+      debugPrint('❌ Command failed: $command - $e');
+      rethrow;
+    } finally {
+      commandService.dispose();
+    }
   }
 
   @override

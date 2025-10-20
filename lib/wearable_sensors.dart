@@ -41,6 +41,7 @@ export 'src/api/wearable_sensors.dart';
 // PUBLIC ENUMS
 // ============================================================
 export 'src/api/enums/connection_state.dart';
+export 'src/api/enums/device_command_type.dart';
 export 'src/api/enums/device_filter.dart';
 export 'src/api/enums/sensor_type.dart';
 export 'src/api/enums/authentication_type.dart';

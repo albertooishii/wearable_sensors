@@ -12,6 +12,7 @@ import '../internal/utils/device_implementation_loader.dart';
 import '../internal/vendors/xiaomi/xiaomi_device_credentials.dart';
 import '../internal/vendors/xiaomi/xiaomi_auth_service.dart'; // For EncryptionKeys
 import 'enums/connection_state.dart';
+import 'enums/device_command_type.dart';
 import 'enums/device_filter.dart';
 import 'enums/sensor_type.dart';
 import 'exceptions/authentication_exception.dart';
@@ -934,6 +935,106 @@ class WearableSensors {
     }
   }
 
+  // ============================================================
+  // DEVICE COMMANDS (WRITE)
+  // ============================================================
+
+  /// Sends a command to a device to write/configure device settings.
+  ///
+  /// Generic API for sending commands like clock sync, language, vibration, etc.
+  /// Uses the [DeviceCommandType] enum for type-safe command handling.
+  ///
+  /// **Parameters:**
+  /// - [deviceId]: The device ID to send command to
+  /// - [command]: Command type (from [DeviceCommandType] enum)
+  /// - [value]: Command value (DateTime for clock, String for language, List for vibration pattern)
+  /// - [metadata]: Optional extra parameters (timezone, language code, etc.)
+  ///
+  /// **Supported Commands:**
+  /// - `DeviceCommandType.clock`: Sync device time. value=DateTime, metadata={'timezone': 'Europe/Madrid'}
+  /// - `DeviceCommandType.language`: Set device language. value='en', metadata={'locale': 'en_US'}
+  /// - `DeviceCommandType.vibration`: Send vibration pattern. value=List<Map<String,int>> with {vibrate:0/1, ms:duration}
+  ///
+  /// **Throws:**
+  /// - [ConnectionException] if device is not connected
+  /// - [WearableException] if command not supported or fails
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Sync clock with current time
+  /// await WearableSensors.write(
+  ///   deviceId,
+  ///   DeviceCommandType.clock,
+  ///   DateTime.now(),
+  ///   metadata: {'timezone': 'Europe/Madrid'},
+  /// );
+  ///
+  /// // Set language
+  /// await WearableSensors.write(
+  ///   deviceId,
+  ///   DeviceCommandType.language,
+  ///   'en',
+  ///   metadata: {'locale': 'en_US'},
+  /// );
+  ///
+  /// // Send vibration test
+  /// await WearableSensors.write(
+  ///   deviceId,
+  ///   DeviceCommandType.vibration,
+  ///   [
+  ///     {'vibrate': 0, 'ms': 100},
+  ///     {'vibrate': 1, 'ms': 100},
+  ///     {'vibrate': 0, 'ms': 100},
+  ///     {'vibrate': 1, 'ms': 100},
+  ///   ],
+  /// );
+  /// ```
+  static Future<void> write(
+    String deviceId,
+    DeviceCommandType command,
+    dynamic value, {
+    Map<String, dynamic>? metadata,
+  }) async {
+    _ensureInitialized();
+
+    try {
+      debugPrint(
+        '📝 [WearableSensors] Write command: ${command.value} for $deviceId',
+      );
+
+      // Delegate to orchestrator via connection manager
+      final orchestrator = _instance!._manager.activeConnections[deviceId];
+
+      if (orchestrator == null) {
+        throw ConnectionException(
+          'Device not connected: $deviceId',
+          code: 'NOT_CONNECTED',
+          deviceId: deviceId,
+        );
+      }
+
+      // Send the command via orchestrator's sendCommand()
+      await orchestrator.sendCommand(
+        command.value,
+        params: {
+          'value': value,
+          ...?metadata,
+        },
+      );
+
+      debugPrint(
+        '✅ [WearableSensors] Command sent successfully: ${command.displayName}',
+      );
+    } catch (e, stackTrace) {
+      throw WearableException(
+        'Failed to send command "${command.value}" to $deviceId: $e',
+        code: 'COMMAND_FAILED',
+        cause: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
   /// Streams multiple sensor types from a device simultaneously.
   ///
   /// Returns a single stream that emits [SensorReading] from all requested sensors.
@@ -1085,8 +1186,11 @@ class WearableSensors {
         debugPrint(
           '🛑 [streamMultiple] AUTO-DEACTIVATING realtime stats for $deviceId',
         );
-        await _instance!._reader.enableRealtimeStats(deviceId, false,
-            sensorType: SensorType.heartRate);
+        await _instance!._reader.enableRealtimeStats(
+          deviceId,
+          false,
+          sensorType: SensorType.heartRate,
+        );
         debugPrint('   ✅ Realtime stats disabled - device will stop streaming');
       } catch (e) {
         debugPrint(
