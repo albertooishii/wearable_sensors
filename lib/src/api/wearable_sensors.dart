@@ -940,8 +940,13 @@ class WearableSensors {
   /// This is more efficient than creating multiple [stream()] subscriptions and
   /// merging them manually.
   ///
+  /// **AUTO-ACTIVATION FOR XIAOMI DEVICES:**
+  /// - When called: Automatically sends START_REALTIME_STATS (type=8, subtype=45) to device
+  /// - When cancelled: Automatically sends STOP_REALTIME_STATS (type=8, subtype=46) to device
+  /// - This is transparent and automatic - no manual enableRealtimeStats() calls needed!
+  ///
   /// **IMPORTANT:** You must cancel the stream subscription when done to avoid
-  /// resource leaks.
+  /// resource leaks and to send the STOP command to the device.
   ///
   /// **Parameters:**
   /// - [deviceId]: The device ID to stream from
@@ -962,9 +967,13 @@ class WearableSensors {
   ///   SensorType.battery,
   /// ];
   ///
-  /// WearableSensors.streamMultiple(deviceId, sensors).listen((reading) {
+  /// // ✅ Automatically sends START command to device
+  /// final subscription = WearableSensors.streamMultiple(deviceId, sensors).listen((reading) {
   ///   print('${reading.sensorType.name}: ${reading.value}');
   /// });
+  ///
+  /// // Later: ✅ Automatically sends STOP command when cancelled
+  /// await subscription.cancel();
   /// ```
   static Stream<SensorReading> streamMultiple(
     String deviceId,
@@ -980,6 +989,21 @@ class WearableSensors {
     }
 
     try {
+      // 🎯 **AUTO-ACTIVATION**: For Xiaomi devices, send START_REALTIME_STATS before streaming
+      // This is automatic and transparent - no manual setup needed!
+      try {
+        debugPrint(
+          '🎯 [streamMultiple] AUTO-ACTIVATING realtime stats for $deviceId',
+        );
+        await _instance!._reader.enableRealtimeStats(deviceId, true);
+        debugPrint('   ✅ Realtime stats enabled - device will start streaming');
+      } catch (e) {
+        // Non-Xiaomi device or already enabled - continue anyway
+        debugPrint(
+          '   ℹ️  enableRealtimeStats skipped (non-Xiaomi or already enabled): $e',
+        );
+      }
+
       // Create controller for merged stream
       final mergedController = StreamController<SensorReading>();
       final subscriptions = <StreamSubscription<SensorReading>>[];
@@ -1050,6 +1074,20 @@ class WearableSensors {
         cause: e,
         stackTrace: stackTrace,
       );
+    } finally {
+      // 🛑 **AUTO-DEACTIVATION**: Send STOP command when stream ends/cancelled
+      try {
+        debugPrint(
+          '🛑 [streamMultiple] AUTO-DEACTIVATING realtime stats for $deviceId',
+        );
+        await _instance!._reader.enableRealtimeStats(deviceId, false);
+        debugPrint('   ✅ Realtime stats disabled - device will stop streaming');
+      } catch (e) {
+        debugPrint(
+          '   ⚠️  Failed to disable realtime stats (may already be stopped): $e',
+        );
+        // Non-critical: stream cleanup continues
+      }
     }
   }
 
@@ -1058,9 +1096,13 @@ class WearableSensors {
   /// Returns a stream that emits new readings as they arrive from the device.
   /// The stream automatically handles reconnection if the connection is lost.
   ///
+  /// **AUTO-ACTIVATION FOR XIAOMI DEVICES:**
+  /// - When called: Automatically sends START_REALTIME_STATS (type=8, subtype=45) to device
+  /// - When cancelled: Automatically sends STOP_REALTIME_STATS (type=8, subtype=46) to device
+  /// - This is transparent and automatic - no manual enableRealtimeStats() calls needed!
+  ///
   /// **IMPORTANT:** You must cancel the stream subscription when done to avoid
-  /// resource leaks. The package tracks active streams and cancels them on
-  /// disconnect, but explicit cancellation is recommended.
+  /// resource leaks and to send the STOP command to the device.
   ///
   /// **Parameters:**
   /// - [deviceId]: The device ID to stream from
@@ -1075,6 +1117,7 @@ class WearableSensors {
   ///
   /// **Example:**
   /// ```dart
+  /// // ✅ Automatically sends START command to device
   /// final subscription = WearableSensors.stream(
   ///   deviceId,
   ///   SensorType.heartRate,
@@ -1082,7 +1125,7 @@ class WearableSensors {
   ///   print('HR: ${reading.value} bpm');
   /// });
   ///
-  /// // Later: cancel to stop streaming
+  /// // Later: ✅ Automatically sends STOP command when cancelled
   /// await subscription.cancel();
   /// ```
   static Stream<SensorReading> stream(
@@ -1093,6 +1136,20 @@ class WearableSensors {
     _ensureInitialized();
 
     try {
+      // 🎯 **AUTO-ACTIVATION**: For Xiaomi devices, send START_REALTIME_STATS before streaming
+      try {
+        debugPrint(
+          '🎯 [stream] AUTO-ACTIVATING realtime stats for $deviceId (${sensorType.name})',
+        );
+        await _instance!._reader.enableRealtimeStats(deviceId, true);
+        debugPrint('   ✅ Realtime stats enabled - device will start streaming');
+      } catch (e) {
+        // Non-Xiaomi device or already enabled - continue anyway
+        debugPrint(
+          '   ℹ️  enableRealtimeStats skipped (non-Xiaomi or already enabled): $e',
+        );
+      }
+
       // Subscribe via BiometricDataReader (now uses SensorType directly)
       final sampleStream = _instance!._reader.subscribe(deviceId, sensorType);
 
@@ -1123,6 +1180,20 @@ class WearableSensors {
         cause: e,
         stackTrace: stackTrace,
       );
+    } finally {
+      // 🛑 **AUTO-DEACTIVATION**: Send STOP command when stream ends/cancelled
+      try {
+        debugPrint(
+          '🛑 [stream] AUTO-DEACTIVATING realtime stats for $deviceId (${sensorType.name})',
+        );
+        await _instance!._reader.enableRealtimeStats(deviceId, false);
+        debugPrint('   ✅ Realtime stats disabled - device will stop streaming');
+      } catch (e) {
+        debugPrint(
+          '   ⚠️  Failed to disable realtime stats (may already be stopped): $e',
+        );
+        // Non-critical: stream cleanup continues
+      }
     }
   }
 

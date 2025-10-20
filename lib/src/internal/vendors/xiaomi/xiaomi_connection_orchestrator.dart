@@ -225,10 +225,12 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
             '✅ [PATH 2: REAUTH] Device bonded at system level but no keys found',
           );
           debugPrint(
-              '   → Situation: Keys were deleted, need to re-authenticate');
+            '   → Situation: Keys were deleted, need to re-authenticate',
+          );
         } else {
           debugPrint(
-              '✅ [PATH 2: FIRST_TIME] Device not bonded - first connection');
+            '✅ [PATH 2: FIRST_TIME] Device not bonded - first connection',
+          );
         }
 
         // 2. BLE Authentication Phase (required for first-time devices)

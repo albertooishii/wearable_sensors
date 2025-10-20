@@ -42,8 +42,8 @@ import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_protobuf_com
 // 🔌 Transport Abstraction
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/transport/spp_transport.dart';
 import 'transport/ble_spp_transport.dart';
-import 'package:wearable_sensors/src/internal/vendors/xiaomi/transport/btclassic_spp_transport.dart';
 import 'xiaomi_spp_service.dart'; // For bonded device init commands
+import 'services/xiaomi_initialization_service.dart';
 
 /// Estados del proceso de autenticación
 enum AuthState {
@@ -62,12 +62,15 @@ class AuthResult {
     this.errorMessage,
     this.encryptionKeys,
     this.sppService, // ← SPP service to reuse (prevents nonce reuse)
+    this.sppV2Handler, // ← SPP V2 handler from BLE auth (for orchestrator to use in transition)
   });
 
   final bool success;
   final String? errorMessage;
   final EncryptionKeys? encryptionKeys;
   final XiaomiSppService? sppService; // ← Shared SPP service instance
+  final SppV2ProtocolHandler?
+      sppV2Handler; // ← BLE handler for transition to BT_CLASSIC
 
   static AuthResult failure(final String message) =>
       AuthResult(success: false, errorMessage: message);
@@ -75,8 +78,14 @@ class AuthResult {
   static AuthResult succeed(
     final EncryptionKeys keys, {
     final XiaomiSppService? sppService,
+    final SppV2ProtocolHandler? sppV2Handler,
   }) =>
-      AuthResult(success: true, encryptionKeys: keys, sppService: sppService);
+      AuthResult(
+        success: true,
+        encryptionKeys: keys,
+        sppService: sppService,
+        sppV2Handler: sppV2Handler,
+      );
 }
 
 /// Claves de encriptación derivadas del handshake
@@ -266,13 +275,6 @@ class XiaomiAuthService {
   static const _commandTypeAuth = 1;
   static const _cmdNonce = 26;
   static const _cmdAuth = 27;
-  static const _healthCommandType = 8;
-  // ✨ REALTIME STATS COMMANDS (Xiaomi Mi Band 9/10 - Gadgetbridge XiaomiHealthService.java)
-  // OLD: static const _cmdConfigHeartRateSet = 11; // Only CONFIGURES HR, doesn't stream
-  static const _cmdRealtimeStatsStart =
-      45; // ← START sending realtime data (THE FIX!)
-  // Future use: static const _cmdRealtimeStatsStop = 46; // STOP sending realtime data
-  // For parsing: static const _cmdRealtimeStatsEvent = 47; // Data events (received from device)
 
   /// Iniciar proceso de autenticación
   ///
@@ -1084,11 +1086,20 @@ class XiaomiAuthService {
           // Non-fatal - continue with auth flow
         }
 
-        // 🔄 Transition to BT_CLASSIC and validate (new integrated flow)
-        // The SPP service is returned and included in AuthResult
-        // Orchestrator MUST reuse it to prevent nonce reuse
-        await _completeBtClassicTransition();
-        debugPrint('✅ SPP V2: BT_CLASSIC transition complete');
+        // ✅ AUTH COMPLETE: Return sppV2Handler for orchestrator to use
+        // Orchestrator will handle transition to BT_CLASSIC (if needed)
+        // Don't do transition here - that's the orchestrator's responsibility
+        debugPrint('✅ SPP V2: BLE authentication complete');
+        debugPrint(
+          '   → Returning sppV2Handler to orchestrator for transition',
+        );
+
+        _safeCompleteAuth(
+          AuthResult.succeed(
+            _encryptionKeys!,
+            sppV2Handler: _sppV2Handler,
+          ),
+        );
       } else {
         debugPrint('❌ SPP V2: Authentication failed: status=${command.status}');
         _safeCompleteAuth(
@@ -1737,410 +1748,21 @@ class XiaomiAuthService {
         '🔧 SPP V2: Starting comprehensive post-auth initialization...',
       );
 
-      // Follow Gadgetbridge XiaomiSupport.onAuthSuccess() sequence
-      // First: System service initialization (XiaomiSystemService.initialize())
-      await _initializeSystemService();
+      // ✨ NEW: Use dedicated initialization service instead of inline code
+      // This keeps auth_service ONLY for authentication, not initialization
+      final initService = XiaomiInitializationService(
+        deviceId: deviceId,
+        sppService: sppService,
+        sppV2Handler: _sppV2Handler,
+      );
 
-      // Small delay between service initializations
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      // Second: Health service initialization (XiaomiHealthService.initialize())
-      await _initializeHealthService();
+      // Run full post-auth initialization (system service + health service + realtime stats)
+      await initService.initializePostAuth();
 
       debugPrint('✅ SPP V2: Comprehensive post-auth initialization completed');
     } on Exception catch (e) {
       debugPrint('❌ SPP V2: Post-auth initialization failed: $e');
       rethrow;
-    }
-  }
-
-  /// Initialize System Service - CRITICAL commands only
-  ///
-  /// **Optimization**: Only send CRITICAL commands immediately after auth:
-  /// - Battery polling (needed for biometric monitoring)
-  /// - Device state (wearing, charging, sleep state)
-  /// - Time/Timezone sync (needed when device is reset)
-  /// - Language sync (needed when device is reset)
-  ///
-  /// Non-critical metadata (password, display items, widgets, etc.)
-  /// will be loaded on-demand from UI screens.
-  ///
-  /// This reduces connection time from ~37s to ~2s by eliminating 7 sequential
-  /// metadata requests that aren't needed for device operation.
-  ///
-  /// **Gadgetbridge Alignment**: Mirrors XiaomiSystemService.initialize()
-  /// which calls setCurrentTime() and setLanguage() on post-auth.
-  Future<void> _initializeSystemService() async {
-    debugPrint('🔧 Initializing System Service (critical commands only)...');
-
-    // XiaomiSystemService constants
-    const int systemCommandType = 2;
-    const int cmdBattery = 1;
-    const int cmdDeviceStateGet = 78;
-    const int cmdClock = 3;
-    const int cmdLanguage = 6;
-
-    try {
-      // CRITICAL: Battery polling
-      debugPrint('   🔋 Battery polling...');
-      await _sendCommand(systemCommandType, cmdBattery, 'get battery state');
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      // CRITICAL: Device state (wearing, charging, sleep)
-      debugPrint('   📊 Device state polling...');
-      await _sendCommand(
-        systemCommandType,
-        cmdDeviceStateGet,
-        'get device status',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      // CRITICAL: Sync time/timezone (needed after device reset)
-      debugPrint('   🕐 Syncing time and timezone...');
-      await _syncTimeToDevice(systemCommandType, cmdClock);
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      // CRITICAL: Sync language/locale (needed after device reset)
-      debugPrint('   🌐 Syncing language and locale...');
-      await _syncLanguageToDevice(systemCommandType, cmdLanguage);
-
-      debugPrint('✅ System Service initialization completed (critical only)');
-    } catch (e) {
-      debugPrint('❌ System Service initialization failed: $e');
-      rethrow;
-    }
-  }
-
-  /// Sync current time and timezone to device
-  ///
-  /// Based on Gadgetbridge XiaomiSystemService.setCurrentTime():
-  /// - Sends year, month, day
-  /// - Sends hour, minute, second, millisecond
-  /// - Sends timezone offset and DST offset
-  /// - Sends time format preference (24h or 12h)
-  /// - ✨ FIXED: Now sends UTC time instead of local time
-  Future<void> _syncTimeToDevice(
-    final int commandType,
-    final int cmdClock,
-  ) async {
-    try {
-      final now = DateTime.now();
-      final utcNow = now.toUtc(); // ✨ Convert to UTC
-      final timeZoneOffsetMinutes = now.timeZoneOffset.inMinutes;
-      final timeZoneOffsetQuarters = timeZoneOffsetMinutes ~/ 15;
-
-      // ✨ NEW: Calculate DST offset
-      final dstOffsetMinutes = _calculateDstOffsetMinutes(now);
-      final dstOffsetQuarters = (dstOffsetMinutes / 15).floor();
-
-      debugPrint(
-        '   📅 Device time sync (UTC): ${utcNow.year}-${utcNow.month.toString().padLeft(2, '0')}-${utcNow.day.toString().padLeft(2, '0')} '
-        '${utcNow.hour.toString().padLeft(2, '0')}:${utcNow.minute.toString().padLeft(2, '0')}:${utcNow.second.toString().padLeft(2, '0')} '
-        'UTC${_formatUtcOffset(timeZoneOffsetMinutes)} (DST: ${dstOffsetMinutes ~/ 60}h)',
-      );
-
-      // Build protobuf Clock message using pb.Clock
-      final clock = pb.Clock()
-        ..time = (pb.Time()
-          ..hour = utcNow.hour // ✨ UTC, not local
-          ..minute = utcNow.minute
-          ..second = utcNow.second
-          ..millisecond = utcNow.millisecond)
-        ..date = (pb.Date()
-          ..year = utcNow.year // ✨ UTC, not local
-          ..month = utcNow.month
-          ..day = utcNow.day)
-        ..timezone = (pb.TimeZone()
-          ..zoneOffset = timeZoneOffsetQuarters
-          ..dstOffset = dstOffsetQuarters // ✨ NEW: Calculate DST
-          ..name = 'UTC${_formatUtcOffset(timeZoneOffsetMinutes)}');
-
-      final system = pb.System()..clock = clock;
-
-      final command = pb.Command()
-        ..type = commandType
-        ..subtype = cmdClock
-        ..system = system;
-
-      // Send encrypted command via SPP V2 or SppService
-      if (_sppVersion == SppProtocolVersion.v2 && _sppV2Handler != null) {
-        debugPrint('📤 Routing time sync to SPP V2 handler');
-        final payload = command.writeToBuffer();
-        await _sppV2Handler!.sendData(
-          deviceId,
-          channel: SppV2Channel.protobufCommand,
-          payload: payload,
-          encrypted: true,
-        );
-      } else if (sppService != null) {
-        debugPrint('📤 Routing time sync to SPP service');
-        await sppService!.sendProtobufCommand(command: command);
-      } else {
-        debugPrint('⚠️ Cannot sync time: No transport available');
-        return;
-      }
-
-      debugPrint('✅ Time sync sent successfully');
-    } on Exception catch (e) {
-      debugPrint('   ⚠️ Time sync warning (non-critical): $e');
-      // Don't rethrow - time sync is nice-to-have but not critical for operation
-    }
-  }
-
-  /// Sync device language/locale to match phone language
-  ///
-  /// Based on Gadgetbridge XiaomiSystemService.setLanguage():
-  /// - Gets device language from system locale
-  /// - Falls back to system Locale.getDefault()
-  /// - Formats as "language_COUNTRY" (e.g., "en_US", "es_ES")
-  Future<void> _syncLanguageToDevice(
-    final int commandType,
-    final int cmdLanguage,
-  ) async {
-    try {
-      // Get language from system locale
-      final languageCode = _getDeviceLocale();
-
-      debugPrint('   🌐 Device language sync: $languageCode');
-
-      // Build protobuf Language message
-      final language = pb.Language()..code = languageCode;
-
-      final system = pb.System()..language = language;
-
-      final command = pb.Command()
-        ..type = commandType
-        ..subtype = cmdLanguage
-        ..system = system;
-
-      // Send encrypted command via SPP V2 or SppService
-      if (_sppVersion == SppProtocolVersion.v2 && _sppV2Handler != null) {
-        debugPrint('📤 Routing language sync to SPP V2 handler');
-        final payload = command.writeToBuffer();
-        await _sppV2Handler!.sendData(
-          deviceId,
-          channel: SppV2Channel.protobufCommand,
-          payload: payload,
-          encrypted: true,
-        );
-      } else if (sppService != null) {
-        debugPrint('📤 Routing language sync to SPP service');
-        await sppService!.sendProtobufCommand(command: command);
-      } else {
-        debugPrint('⚠️ Cannot sync language: No transport available');
-        return;
-      }
-
-      debugPrint('✅ Language sync sent successfully');
-    } on Exception catch (e) {
-      debugPrint('   ⚠️ Language sync warning (non-critical): $e');
-      // Don't rethrow - language sync is nice-to-have but not critical for operation
-    }
-  }
-
-  /// Format UTC offset as string (e.g., "+02:00", "-05:00")
-  String _formatUtcOffset(final int minutes) {
-    final hours = minutes ~/ 60;
-    final mins = (minutes % 60).abs();
-    final sign = minutes >= 0 ? '+' : '-';
-    return '$sign${hours.abs().toString().padLeft(2, '0')}:${mins.toString().padLeft(2, '0')}';
-  }
-
-  /// Get device language/locale as string
-  ///
-  /// Format: "language_COUNTRY" (e.g., "en_US", "es_ES")
-  String _getDeviceLocale() {
-    // On Flutter, use defaultLocale if available
-    // This would normally come from system settings
-    final locale = _getCurrentSystemLocale();
-    return locale;
-  }
-
-  /// Get current system locale as "language_COUNTRY" string
-  String _getCurrentSystemLocale() {
-    try {
-      // Get system locale from Flutter
-      // Platform.localeName returns format like "es_ES", "en_US", "pt_BR", etc.
-      final localeName = Platform.localeName;
-
-      debugPrint('   🌍 System locale detected: $localeName');
-
-      // Platform.localeName can return formats like:
-      // - "es_ES" (Spanish - Spain)
-      // - "en_US" (English - United States)
-      // - "pt_BR" (Portuguese - Brazil)
-      // - Sometimes just "es" or "en" (without country code)
-
-      // If locale doesn't have underscore, add default country code
-      if (!localeName.contains('_')) {
-        final languageCode = localeName.toLowerCase();
-        // Map common language codes to default country codes
-        final defaultCountry = {
-          'es': 'ES', // Spanish → Spain
-          'en': 'US', // English → United States
-          'pt': 'BR', // Portuguese → Brazil
-          'fr': 'FR', // French → France
-          'de': 'DE', // German → Germany
-          'it': 'IT', // Italian → Italy
-          'ja': 'JP', // Japanese → Japan
-          'ko': 'KR', // Korean → South Korea
-          'zh': 'CN', // Chinese → China
-          'ru': 'RU', // Russian → Russia
-        }[languageCode];
-
-        if (defaultCountry != null) {
-          final fullLocale = '${languageCode}_$defaultCountry';
-          debugPrint('   📍 Expanded locale: $languageCode → $fullLocale');
-          return fullLocale;
-        }
-      }
-
-      return localeName;
-    } on Exception catch (e) {
-      debugPrint('   ⚠️ Could not determine system locale: $e');
-      return 'en_US'; // Fallback only if Platform.localeName fails
-    }
-  }
-
-  /// Initialize Health Service - mirrors XiaomiHealthService.initialize()
-  Future<void> _initializeHealthService() async {
-    debugPrint('🔧 Initializing Health Service...');
-
-    // XiaomiHealthService constants
-    const int cmdConfigSpo2Get = 8;
-    const int cmdConfigHeartRateGet = 10;
-    const int cmdConfigStandingReminderGet = 12;
-    const int cmdConfigStressGet = 14;
-    const int cmdConfigGoalNotificationGet = 21;
-    const int cmdConfigGoalsGet = 42;
-    const int cmdConfigVitalityScoreGet = 35;
-
-    try {
-      // Send all health config commands (like Gadgetbridge)
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigSpo2Get,
-        'get spo2 config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigHeartRateGet,
-        'get heart rate config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      // ✨ CRITICAL FIX: Start realtime stats (subtype=45) instead of just configuring (subtype=11)
-      // This tells the device to BEGIN STREAMING sensor data
-      await _startRealtimeStats();
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigStandingReminderGet,
-        'get standing reminders config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigStressGet,
-        'get stress config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigGoalNotificationGet,
-        'get goal notification config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigGoalsGet,
-        'get goals config',
-      );
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      await _sendCommand(
-        _healthCommandType,
-        cmdConfigVitalityScoreGet,
-        'get vitality score config',
-      );
-
-      debugPrint('✅ Health Service initialization completed');
-    } catch (e) {
-      debugPrint('❌ Health Service initialization failed: $e');
-      rethrow;
-    }
-  }
-
-  /// 🎯 START REALTIME STATS - Critical for heart rate data!
-  ///
-  /// **THIS WAS THE BUG:** We were sending subtype=11 (CONFIG_HEART_RATE_SET)
-  /// which only CONFIGURES the HR monitoring but does NOT enable data streaming.
-  ///
-  /// Sends subtype=45 (START_REALTIME_STATS) to tell the device to BEGIN
-  /// transmitting realtime sensor data (type=8, subtype=47 events at ~1Hz).
-  ///
-  /// Based on Gadgetbridge's XiaomiHealthService.enableRealtimeStats():
-  /// ```java
-  /// public void enableRealtimeStats(final boolean enable) {
-  ///     getSupport().sendCommand(
-  ///         "realtime data",
-  ///         XiaomiProto.Command.newBuilder()
-  ///             .setType(8)  // COMMAND_TYPE
-  ///             .setSubtype(enable ? 45 : 46)  // START or STOP
-  ///             .build()
-  ///     );
-  /// }
-  /// ```
-  ///
-  /// **Without this command:**
-  /// ❌ Device is configured to monitor HR (subtype=11)
-  /// ❌ But device NEVER sends subtype=47 events
-  /// ❌ "Waiting for data..." timeout forever
-  ///
-  /// **With this command:**
-  /// ✅ Device starts sending subtype=47 events (~1/sec)
-  /// ✅ Parser extracts heart rate and other sensors
-  /// ✅ UI displays real data
-  Future<void> _startRealtimeStats() async {
-    debugPrint('   🎯 STARTING REALTIME STATS (type=8, subtype=45)...');
-    debugPrint('   📝 This tells device to BEGIN streaming sensor data!');
-
-    try {
-      // ✨ CRITICAL FIX: Use subtype=45 (START_REALTIME_STATS), NOT 11!
-      // Subtype 11 = CONFIG (device doesn't stream)
-      // Subtype 45 = START (device streams subtype=47 events)
-
-      final command = pb.Command()
-        ..type = _healthCommandType // Health command type = 8
-        ..subtype = _cmdRealtimeStatsStart; // ✨ CORRECTED: 45 instead of 11
-
-      // Send via SPP V2 handler (encrypted)
-      if (_sppVersion == SppProtocolVersion.v2 && _sppV2Handler != null) {
-        debugPrint('   📤 Sending START_REALTIME_STATS command (encrypted)');
-        final payload = command.writeToBuffer();
-        await _sppV2Handler!.sendData(
-          deviceId,
-          channel: SppV2Channel.protobufCommand,
-          payload: payload,
-          encrypted: true, // Post-auth commands must be encrypted
-        );
-        debugPrint(
-            '   ✅ REALTIME STATS STARTED - Device should now stream data!');
-      } else {
-        debugPrint(
-            '   ⚠️ SPP V2 handler not available, skipping realtime start');
-      }
-    } on Exception catch (e) {
-      // Non-critical: Log but don't fail initialization
-      debugPrint('   ⚠️ Failed to start realtime stats: $e');
-      debugPrint(
-          '   ℹ️  Device data streaming may not work until manually enabled');
     }
   }
 
@@ -2327,81 +1949,6 @@ class XiaomiAuthService {
   ///
   /// This method is called AFTER successful BLE authentication.
   /// It performs:
-  /// 1. Disconnect BLE cleanly
-  /// 2. Connect BT_CLASSIC (SPP/RFCOMM)
-  /// 3. Send critical commands (battery, device_info, time_sync)
-  /// 4. Complete authentication ONLY if BT_CLASSIC works
-  ///
-  /// Returns the SPP service instance to prevent nonce reuse.
-  /// The orchestrator MUST reuse this instance instead of creating a new one.
-  Future<XiaomiSppService> _completeBtClassicTransition() async {
-    try {
-      debugPrint('🔄 SPP V2: Starting BLE→BT_CLASSIC transition...');
-
-      // 1. Disconnect BLE cleanly
-      debugPrint('   📴 Disconnecting BLE...');
-      await bleService.disconnectDevice(deviceId);
-      debugPrint('   ✅ BLE disconnected');
-
-      // 2. Wait for device to prepare BT_CLASSIC
-      debugPrint('   ⏳ Waiting for device to prepare BT_CLASSIC (2s)...');
-      await Future.delayed(const Duration(seconds: 2));
-
-      // 3. Connect via Bluetooth Classic
-      if (btClassicService == null) {
-        throw Exception('BT_CLASSIC service not available');
-      }
-
-      debugPrint('   📡 Connecting BT_CLASSIC...');
-      await btClassicService!.connect(deviceId);
-      debugPrint('   ✅ BT_CLASSIC connected');
-
-      // 4. Create BT_CLASSIC SPP transport
-      final btClassicTransport = BtClassicSppTransport(
-        deviceAddress: deviceId,
-        btClassicService: btClassicService!,
-      );
-
-      debugPrint('   🔌 Initializing BT_CLASSIC transport...');
-      await btClassicTransport.initialize();
-      debugPrint('   ✅ BT_CLASSIC transport ready');
-
-      // 5. Create XiaomiSppService with BT_CLASSIC transport
-      // ⚠️ CRITICAL: This service instance MUST be reused by orchestrator
-      // to prevent sequence counter reset (nonce reuse)
-      final sppService = XiaomiSppService(
-        transport: btClassicTransport,
-        deviceType: deviceImplementation.deviceType,
-        deviceId: deviceId,
-        encryptionKeys: _encryptionKeys,
-      );
-
-      debugPrint('   🔧 Initializing SPP service...');
-      await sppService.connect();
-      debugPrint('   ✅ SPP service connected');
-
-      // 6. BT_CLASSIC is ready - SPP Version handshake completed
-      // ⚠️ NO enviamos comandos System aquí (battery, device info, etc.)
-      // Razón: Gadgetbridge solo envía comandos DESPUÉS de auth completa
-      // Los comandos System se envían desde orchestrator una vez autenticado
-      debugPrint(
-        '✅ BT_CLASSIC transition complete - ready for post-auth commands',
-      );
-
-      // 7. Complete authentication successfully WITH the SPP service
-      _safeCompleteAuth(
-        AuthResult.succeed(_encryptionKeys!, sppService: sppService),
-      );
-
-      // 8. Return SPP service for orchestrator to reuse
-      return sppService;
-    } on Exception catch (e) {
-      debugPrint('❌ BT_CLASSIC transition failed: $e');
-      _safeCompleteAuth(AuthResult.failure('BT_CLASSIC transition error: $e'));
-      rethrow; // Propagate error so caller knows transition failed
-    }
-  }
-
   /// Safely complete auth completer (prevents "Bad state: Future already completed" errors)
   Future<void> _safeCompleteAuth(final AuthResult result) async {
     if (_authCompleter != null && !_authCompleter!.isCompleted) {
@@ -2445,6 +1992,10 @@ class XiaomiAuthService {
     // Winter time (UTC+1) = no DST
     return 0;
   }
+
+  // 🔌 Getters for post-auth services (used by InitializationService)
+  SppV2ProtocolHandler? getSppV2Handler() => _sppV2Handler;
+  XiaomiSppService? getSppService() => sppService;
 
   void dispose() {
     _dataSubscription?.cancel();

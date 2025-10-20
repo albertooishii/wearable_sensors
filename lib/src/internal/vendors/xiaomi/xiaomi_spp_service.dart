@@ -47,11 +47,13 @@ class SppDataPacket {
     required this.deviceId,
     required this.data,
     required this.timestamp,
+    this.channel,
   });
 
   final String deviceId;
   final Uint8List data;
   final DateTime timestamp;
+  final String? channel; // Channel name (e.g., 'protobuf_command', 'activity')
 }
 
 /// Xiaomi SPP Service
@@ -805,18 +807,17 @@ class XiaomiSppService {
     // Socket puede enviar datos fragmentados, necesitamos buffer acumulativo
     _buffer.add(data);
 
-    final bufferSizeBefore = _buffer.length;
-    debugPrint('🔍 Buffer BEFORE processing: $bufferSizeBefore bytes total');
-
     // Procesar buffer para extraer packets completos
     _processBuffer();
 
     final bufferSizeAfter = _buffer.length;
-    debugPrint('🔍 Buffer AFTER processing: $bufferSizeAfter bytes remaining');
+    // Only log if buffer still has data (incomplete packet scenario)
     if (bufferSizeAfter > 0) {
+      debugPrint(
+          '   ⚠️ Buffer has $bufferSizeAfter bytes remaining (incomplete packet)');
       final remaining = _buffer.toBytes();
       debugPrint(
-        '   ⚠️ Remaining buffer hex: ${remaining.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+        '      Hex: ${remaining.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
       );
     }
   }
@@ -835,16 +836,16 @@ class XiaomiSppService {
       final bufferBytes = _buffer.toBytes();
 
       if (bufferBytes.isEmpty) {
-        debugPrint('🔍 SPP: Buffer empty after $loopIteration iteration(s)');
+        // Buffer fully processed - normal condition
         break; // Nothing to process
       }
 
       debugPrint(
-        '🔍 SPP: Processing buffer iteration #$loopIteration (${bufferBytes.length} bytes)',
+        '🔍 SPP: Processing iteration #$loopIteration (${bufferBytes.length} bytes)',
       );
       if (loopIteration > 10) {
         debugPrint(
-          '⚠️ SPP: Too many loop iterations, breaking to prevent hang',
+          '⚠️ SPP: Too many iterations (suspected infinite loop), breaking',
         );
         break;
       }
@@ -928,6 +929,7 @@ class XiaomiSppService {
             deviceId: deviceId,
             data: bufferBytes,
             timestamp: DateTime.now(),
+            channel: 'protobuf_command', // SPP V1 default channel
           ),
         );
 
@@ -1053,142 +1055,163 @@ class XiaomiSppService {
           '   Payload hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
         );
 
-        // Parse protobuf Command from payload
-        try {
-          final command = proto.Command.fromBuffer(payload);
+        // Only attempt to parse protobuf Command when the channel is
+        // protobuf_command. Activity/data channels carry different payload
+        // encodings and should NOT be blindly parsed as Command objects.
+        if (channel == SppV2Channel.protobufCommand) {
+          // Parse protobuf Command from payload
+          try {
+            final command = proto.Command.fromBuffer(payload);
 
-          debugPrint(
-            '   ✅ Parsed Command: type=${command.type}, subtype=${command.subtype}',
-          );
-
-          // Check if this is a realtime stats event (unsolicited)
-          final isRealtimeStatsEvent =
-              command.type == 8 && command.subtype == 47;
-
-          if (isRealtimeStatsEvent) {
             debugPrint(
-              '   🎯 REALTIME STATS EVENT DETECTED! (type=8, subtype=47)',
+              '   ✅ Parsed Command: type=${command.type}, subtype=${command.subtype}',
             );
-          }
 
-          // ✅ FIX: Match response to request by sequence number (not FIFO)
-          // This ensures responses arrive in correct order, even if packets are delayed
-          if (!isRealtimeStatsEvent) {
-            // ✅ PRIMARY: Try to match by sequence number
-            final requestId = _sequenceToRequestId[sequenceNumber];
+            // Check if this is a realtime stats event (unsolicited)
+            final isRealtimeStatsEvent =
+                command.type == 8 && command.subtype == 47;
 
-            if (requestId != null) {
-              // ✅ EXACT MATCH: Found by sequence number
-              final completer = _pendingRequests.remove(requestId);
-              _sequenceToRequestId.remove(sequenceNumber);
-              _requestIdToExpectedCommand.remove(requestId); // ✅ Cleanup
-
-              if (completer != null && !completer.isCompleted) {
-                completer.complete(command);
-                debugPrint(
-                  '✅ SPP: Completed requestId=$requestId (matched by seq=$sequenceNumber)',
-                );
-              }
-            } else {
-              // ⚠️ FALLBACK: Device responded with different seq than expected
-              // This can happen with buggy devices that don't echo the exact seq
-              // Try intelligent fallback: match by command type+subtype signature
+            if (isRealtimeStatsEvent) {
               debugPrint(
-                '⚠️ SPP: No exact seq match for seq=$sequenceNumber, trying intelligent fallback',
+                '   🎯 REALTIME STATS EVENT DETECTED! (type=8, subtype=47)',
               );
+            }
 
-              // Build signature of received command
-              final responseSignature = '${command.type}:${command.subtype}';
-              debugPrint('   📋 Response signature: $responseSignature');
+            // ✅ FIX: Match response to request by sequence number (not FIFO)
+            // This ensures responses arrive in correct order, even if packets are delayed
+            if (!isRealtimeStatsEvent) {
+              // ✅ PRIMARY: Try to match by sequence number
+              final requestId = _sequenceToRequestId[sequenceNumber];
 
-              // Search pending requests for matching expected command
-              int? matchingRequestId;
-              for (final entry in _requestIdToExpectedCommand.entries) {
-                if (entry.value == responseSignature &&
-                    _pendingRequests.containsKey(entry.key)) {
-                  matchingRequestId = entry.key;
-                  debugPrint(
-                    '   ✅ Found matching pending request: requestId=$matchingRequestId expects $responseSignature',
-                  );
-                  break;
-                }
-              }
-
-              if (matchingRequestId != null) {
-                // Found matching request by command signature
-                final matchingCompleter = _pendingRequests.remove(
-                  matchingRequestId,
-                );
-                _requestIdToExpectedCommand.remove(matchingRequestId);
+              if (requestId != null) {
+                // ✅ EXACT MATCH: Found by sequence number
+                final completer = _pendingRequests.remove(requestId);
                 _sequenceToRequestId.remove(sequenceNumber);
+                _requestIdToExpectedCommand.remove(requestId); // ✅ Cleanup
 
-                debugPrint(
-                  '   → Using signature match: seq=$sequenceNumber → requestId=$matchingRequestId',
-                );
-
-                if (matchingCompleter != null &&
-                    !matchingCompleter.isCompleted) {
-                  matchingCompleter.complete(command);
+                if (completer != null && !completer.isCompleted) {
+                  completer.complete(command);
                   debugPrint(
-                    '✅ SPP: Completed requestId=$matchingRequestId (matched by command signature)',
+                    '✅ SPP: Completed requestId=$requestId (matched by seq=$sequenceNumber)',
                   );
                 }
               } else {
-                // No match found - last resort FIFO fallback
+                // ⚠️ FALLBACK: Device responded with different seq than expected
+                // This can happen with buggy devices that don't echo the exact seq
+                // Try intelligent fallback: match by command type+subtype signature
                 debugPrint(
-                  '   ⚠️  No signature match found, trying FIFO as last resort',
+                  '⚠️ SPP: No exact seq match for seq=$sequenceNumber, trying intelligent fallback',
                 );
 
-                if (_pendingRequests.isNotEmpty) {
-                  final fallbackRequestId = _pendingRequests.keys.first;
-                  final fallbackCompleter = _pendingRequests.remove(
-                    fallbackRequestId,
+                // Build signature of received command
+                final responseSignature = '${command.type}:${command.subtype}';
+                debugPrint('   📋 Response signature: $responseSignature');
+
+                // Search pending requests for matching expected command
+                int? matchingRequestId;
+                for (final entry in _requestIdToExpectedCommand.entries) {
+                  if (entry.value == responseSignature &&
+                      _pendingRequests.containsKey(entry.key)) {
+                    matchingRequestId = entry.key;
+                    debugPrint(
+                      '   ✅ Found matching pending request: requestId=$matchingRequestId expects $responseSignature',
+                    );
+                    break;
+                  }
+                }
+
+                if (matchingRequestId != null) {
+                  // Found matching request by command signature
+                  final matchingCompleter = _pendingRequests.remove(
+                    matchingRequestId,
                   );
-                  _requestIdToExpectedCommand.remove(fallbackRequestId);
+                  _requestIdToExpectedCommand.remove(matchingRequestId);
                   _sequenceToRequestId.remove(sequenceNumber);
 
                   debugPrint(
-                    '   → Using FIFO fallback: matched seq=$sequenceNumber to requestId=$fallbackRequestId',
+                    '   → Using signature match: seq=$sequenceNumber → requestId=$matchingRequestId',
                   );
 
-                  if (fallbackCompleter != null &&
-                      !fallbackCompleter.isCompleted) {
-                    fallbackCompleter.complete(command);
+                  if (matchingCompleter != null &&
+                      !matchingCompleter.isCompleted) {
+                    matchingCompleter.complete(command);
                     debugPrint(
-                      '✅ SPP: Completed requestId=$fallbackRequestId (matched by FIFO fallback)',
+                      '✅ SPP: Completed requestId=$matchingRequestId (matched by command signature)',
                     );
                   }
                 } else {
+                  // No match found - last resort FIFO fallback
                   debugPrint(
-                    '❌ SPP: No pending requests available for fallback',
+                    '   ⚠️  No signature match found, trying FIFO as last resort',
                   );
+
+                  if (_pendingRequests.isNotEmpty) {
+                    final fallbackRequestId = _pendingRequests.keys.first;
+                    final fallbackCompleter = _pendingRequests.remove(
+                      fallbackRequestId,
+                    );
+                    _requestIdToExpectedCommand.remove(fallbackRequestId);
+                    _sequenceToRequestId.remove(sequenceNumber);
+
+                    debugPrint(
+                      '   → Using FIFO fallback: matched seq=$sequenceNumber to requestId=$fallbackRequestId',
+                    );
+
+                    if (fallbackCompleter != null &&
+                        !fallbackCompleter.isCompleted) {
+                      fallbackCompleter.complete(command);
+                      debugPrint(
+                        '✅ SPP: Completed requestId=$fallbackRequestId (matched by FIFO fallback)',
+                      );
+                    }
+                  }
+                  // Note: If no pending requests, it's OK - unsolicited device message
+                  // These are normal (e.g., HR updates, sleep data) and don't need fallback
                 }
               }
             }
+
+            // ✅ CRITICAL: Send ACK back to device (Gadgetbridge pattern)
+            _sendAck(sequenceNumber);
+
+            // Emit ALL commands to data stream (for realtime stats events, etc.)
+            // Subscribers can filter by command type/subtype
+            _dataStreamController.add(
+              SppDataPacket(
+                deviceId: deviceId,
+                data: payload,
+                timestamp: DateTime.now(),
+                channel: channel.name, // Include channel information
+              ),
+            );
+          } on Exception catch (e) {
+            debugPrint('⚠️ SPP: Failed to parse Command: $e');
+            onDataReceived?.call(payload);
+
+            // Emit to data stream
+            _dataStreamController.add(
+              SppDataPacket(
+                deviceId: deviceId,
+                data: payload,
+                timestamp: DateTime.now(),
+                channel: channel.name, // Include channel information
+              ),
+            );
           }
-
-          // ✅ CRITICAL: Send ACK back to device (Gadgetbridge pattern)
-          _sendAck(sequenceNumber);
-
-          // Emit ALL commands to data stream (for realtime stats events, etc.)
-          // Subscribers can filter by command type/subtype
-          _dataStreamController.add(
-            SppDataPacket(
-              deviceId: deviceId,
-              data: payload,
-              timestamp: DateTime.now(),
-            ),
+        } else {
+          // Non-protobuf channels (activity, data, etc.) - do not attempt
+          // protobuf parsing. Emit raw decrypted payload to subscribers so
+          // higher-level parsers (e.g., activity parsers) can handle it.
+          debugPrint(
+            '   ℹ️  Received non-protobuf channel ($channel), emitting raw payload',
           );
-        } on Exception catch (e) {
-          debugPrint('⚠️ SPP: Failed to parse Command: $e');
           onDataReceived?.call(payload);
-
-          // Emit to data stream
           _dataStreamController.add(
             SppDataPacket(
               deviceId: deviceId,
               data: payload,
               timestamp: DateTime.now(),
+              channel: channel.name,
             ),
           );
         }
@@ -1217,14 +1240,17 @@ class XiaomiSppService {
     _buffer.clear();
 
     if (count >= bufferBytes.length) {
-      debugPrint('   🗑️ Cleared entire buffer ($count bytes)');
+      // Entire buffer cleared - normal after processing a packet
       return;
     }
 
     // Keep remaining bytes
     final remaining = bufferBytes.sublist(count);
     _buffer.add(remaining);
-    debugPrint('   ✂️ Skipped $count bytes, ${remaining.length} remaining');
+    // Only log if significant amount remaining (multi-packet scenario)
+    if (remaining.isNotEmpty) {
+      debugPrint('   ✂️ ${remaining.length} bytes queued for next iteration');
+    }
   }
 
   /// Send ACK packet to device (Gadgetbridge pattern)

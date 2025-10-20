@@ -369,33 +369,112 @@ class BiometricDataReader {
     }
 
     try {
-      // ✅ SIMPLIFIED: Just send START/STOP command
-      // HR monitoring is already configured in post-auth initialization
-      final command = enable
-          ? createRealtimeStatsStartRequest()
-          : createRealtimeStatsStopRequest();
+      if (enable) {
+        // 🎯 **CRITICAL FIX (User Discovery)**:
+        // Device requires CONFIG_HEART_RATE_SET (subtype=11) BEFORE START_REALTIME_STATS (subtype=45)
+        //
+        // **Evidence from logs**:
+        // - Post-auth init WORKS: sends CONFIG (11) → then START (45) → device streams
+        // - Manual activation FAILS: only sends START (45) → device ignores it
+        //
+        // **Payload**: This is the EXACT CONFIG sent during post-auth initialization:
+        // Hex: 08 08 10 0b 52 18 42 16 08 00 10 00 18 00 20 00 2a 02 08 00 38 01 42 04 08 00 10 00 48 02
+        // Decoded:
+        // - type=8 (health)
+        // - subtype=11 (CONFIG_HEART_RATE_SET)
+        // - Health message with continuous mode parameters
 
-      debugPrint(
-        '🔄 ${enable ? 'Starting' : 'Stopping'} realtime stats for $deviceId',
-      );
-      debugPrint(
-        '   📤 Sending command: type=${command.type}, subtype=${command.subtype}',
-      );
+        debugPrint(
+          '🔄 [enableRealtimeStats] Preparing device for HR streaming...',
+        );
+        debugPrint(
+          '   📤 STEP 1: Sending CONFIG_HEART_RATE_SET (subtype=11)...',
+        );
 
-      // ✅ CRITICAL: START/STOP commands don't respond immediately
-      // Device will start/stop sending events (subtype 47) instead
-      await sppService.sendProtobufCommand(
-        command: command,
-        expectsResponse:
-            false, // ← Fire-and-forget (no timeout waiting for response)
-      );
+        // Step 1: Send CONFIG command (fire-and-forget, like post-auth does)
+        try {
+          final configPayload = Uint8List.fromList([
+            0x08,
+            0x08,
+            0x10,
+            0x0b,
+            0x52,
+            0x18,
+            0x42,
+            0x16,
+            0x08,
+            0x00,
+            0x10,
+            0x00,
+            0x18,
+            0x00,
+            0x20,
+            0x00,
+            0x2a,
+            0x02,
+            0x08,
+            0x00,
+            0x38,
+            0x01,
+            0x42,
+            0x04,
+            0x08,
+            0x00,
+            0x10,
+            0x00,
+            0x48,
+            0x02,
+          ]);
 
-      debugPrint(
-        '   ✅ Realtime stats command sent (${enable ? 'start' : 'stop'})',
-      );
-      debugPrint(
-        '   ℹ️  Device will ${enable ? 'start' : 'stop'} sending subtype 47 events',
-      );
+          final configCommand = pb.Command.fromBuffer(configPayload);
+          await sppService.sendProtobufCommand(
+            command: configCommand,
+            expectsResponse: false, // Fire-and-forget
+          );
+          debugPrint('   ✅ CONFIG sent successfully');
+        } catch (e) {
+          debugPrint(
+            '   ⚠️  CONFIG send failed: $e (continuing with START anyway...)',
+          );
+        }
+
+        // Wait for device to process CONFIG
+        debugPrint('   ⏱️  Waiting 150ms for device to process CONFIG...');
+        await Future.delayed(const Duration(milliseconds: 150));
+
+        // Step 2: Send START command
+        debugPrint(
+          '   📤 STEP 2: Sending START_REALTIME_STATS (subtype=45)...',
+        );
+        final startCommand = createRealtimeStatsStartRequest();
+
+        await sppService.sendProtobufCommand(
+          command: startCommand,
+          expectsResponse: false,
+        );
+
+        debugPrint('   ✅ START sent successfully');
+        debugPrint('   📊 Device should now stream HR data (subtype=47)');
+
+        // Wait for device to prepare streaming
+        debugPrint('   ⏱️  Waiting 200ms for device to prepare streaming...');
+        await Future.delayed(const Duration(milliseconds: 200));
+        debugPrint('   ✅ Device ready for streaming!');
+      } else {
+        // STOP: Just send the STOP command
+        debugPrint('🔄 [enableRealtimeStats] Stopping HR streaming...');
+        debugPrint('   📤 Sending STOP_REALTIME_STATS (subtype=46)...');
+
+        final stopCommand = createRealtimeStatsStopRequest();
+
+        await sppService.sendProtobufCommand(
+          command: stopCommand,
+          expectsResponse: false,
+        );
+
+        debugPrint('   ✅ STOP sent successfully');
+        debugPrint('   ℹ️  Device will stop sending subtype=47 events');
+      }
     } on Exception catch (e) {
       debugPrint('❌ enableRealtimeStats failed: $e');
       rethrow;
@@ -473,13 +552,78 @@ class BiometricDataReader {
       // Subscribe to SPP data stream
       await for (final packet in sppService.dataStream) {
         debugPrint(
-          '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}',
+          '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}, channel=${packet.channel}',
         );
 
         if (packet.deviceId != deviceId) {
           debugPrint('   ⏭️  Skipping packet from different device');
           continue;
         }
+
+        // ✅ CRITICAL: Check packet channel to determine how to process
+        if (packet.channel == 'activity') {
+          // Activity channel: Raw sensor data, often contains realtime stats
+          debugPrint(
+            '   📊 Activity channel detected - attempting to parse sensor data',
+          );
+          debugPrint(
+            '   📋 Payload size: ${packet.data.length} bytes',
+          );
+
+          // Try to parse using the xiaomi realtime stats multi-parser.
+          // This parser handles:
+          // 1. Direct protobuf Command (type=8, subtype=47)
+          // 2. Embedded protobuf (scans offsets up to 32 bytes)
+          // 3. Returns null if not a valid realtime stats event
+          final parser = ParserRegistry.getMultiParser(
+            'xiaomi_spp_realtime_stats',
+          );
+
+          if (parser != null) {
+            try {
+              debugPrint(
+                '   🔍 Attempting to parse activity payload with xiaomi_spp_realtime_stats parser...',
+              );
+              final samples = parser(packet.data);
+              if (samples != null && samples.isNotEmpty) {
+                debugPrint(
+                  '   ✅ Successfully parsed ${samples.length} samples from activity channel',
+                );
+                for (final sample in samples) {
+                  debugPrint(
+                    '   📊 Yielding: ${sample.sensorType.displayName} = ${sample.value}',
+                  );
+                  yield sample;
+                }
+                continue; // processed this packet
+              } else {
+                debugPrint(
+                  '   ⚠️  Parser returned null or empty (not a realtime stats event)',
+                );
+                // This is not an error - activity channel might contain other data types
+                continue;
+              }
+            } on Exception catch (e) {
+              debugPrint('   ⚠️  Activity parser threw exception: $e');
+              debugPrint(
+                '   📋 Payload (hex): ${packet.data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+              );
+              // Continue to next packet - this activity data wasn't parseable as realtime stats
+              continue;
+            }
+          } else {
+            debugPrint(
+              '   ❌ Parser "xiaomi_spp_realtime_stats" not found in registry',
+            );
+            debugPrint(
+              '   📋 Available parsers: ${ParserRegistry.availableParsers}',
+            );
+            continue;
+          }
+        }
+
+        // protobuf_command channel: Standard Command protobuf
+        debugPrint('   🔧 Protobuf command channel detected');
 
         // Decode protobuf command
         pb.Command? command;

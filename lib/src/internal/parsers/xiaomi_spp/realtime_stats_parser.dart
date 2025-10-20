@@ -47,27 +47,112 @@ class XiaomiSppRealtimeStatsParser {
   /// - All sensor values are zero/invalid
   static List<BiometricSample>? parse(final List<int> bytes) {
     try {
+      debugPrint(
+        '   🔍 XiaomiSppRealtimeStatsParser: Attempting to parse ${bytes.length} bytes',
+      );
+
       // 1. Parse protobuf Command
-      final command = pb.Command.fromBuffer(Uint8List.fromList(bytes));
+      // Some devices sometimes deliver the protobuf payload embedded inside
+      // an activity/data packet with a small header. Try direct parse first,
+      // then attempt to find an embedded protobuf by scanning small offsets.
+      pb.Command command;
+      try {
+        debugPrint(
+          '   🔍 Attempting direct protobuf decode...',
+        );
+        command = pb.Command.fromBuffer(Uint8List.fromList(bytes));
+        debugPrint(
+          '   ✅ Direct decode successful: type=${command.type}, subtype=${command.subtype}',
+        );
+      } catch (e) {
+        debugPrint(
+          '   ⚠️  Direct decode failed: $e',
+        );
+        debugPrint(
+          '   🔍 Scanning for embedded protobuf at offsets 1-31...',
+        );
+
+        // Attempt to locate embedded protobuf by scanning offsets up to 32 bytes
+        bool parsed = false;
+        command = pb.Command();
+        final maxScan = bytes.length < 32 ? bytes.length : 32;
+        for (int offset = 1; offset < maxScan; offset++) {
+          try {
+            final slice = Uint8List.fromList(bytes.sublist(offset));
+            final candidate = pb.Command.fromBuffer(slice);
+            // Validate it's a sensible command
+            if (candidate.type >= 0 && candidate.type <= 15) {
+              command = candidate;
+              parsed = true;
+              debugPrint(
+                '   ✅ Found embedded protobuf at offset $offset: type=${command.type}, subtype=${command.subtype}',
+              );
+              break;
+            }
+          } on Exception {
+            // continue scanning
+          }
+        }
+
+        if (!parsed) {
+          debugPrint(
+            '   ❌ No valid protobuf found at any offset',
+          );
+          debugPrint(
+            '   📋 Payload (hex): ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+          );
+          // Rethrow original error to be handled by outer catch
+          rethrow;
+        }
+      }
 
       // 2. Validate command type (Health service, realtime event)
+      debugPrint(
+        '   🔍 Validating command type: expecting (8, 47), got (${command.type}, ${command.subtype})',
+      );
       if (command.type != 8 || command.subtype != 47) {
         // Not a realtime stats event
+        debugPrint(
+          '   ⚠️  Not a realtime stats event (type=${command.type}, subtype=${command.subtype})',
+        );
         return null;
       }
 
       // 3. Extract RealTimeStats
-      if (!command.hasHealth() || !command.health.hasRealTimeStats()) {
+      debugPrint(
+        '   🔍 Checking for Health and RealTimeStats fields...',
+      );
+      if (!command.hasHealth()) {
+        debugPrint(
+          '   ⚠️  Command has no Health field',
+        );
+        return null;
+      }
+
+      if (!command.health.hasRealTimeStats()) {
+        debugPrint(
+          '   ⚠️  Health has no RealTimeStats field',
+        );
         return null;
       }
 
       final stats = command.health.realTimeStats;
+      debugPrint(
+        '   ✅ Successfully extracted RealTimeStats',
+      );
+      debugPrint(
+        '   📊 Fields: HR=${stats.heartRate}, steps=${stats.steps}, unknown3=${stats.unknown3}, calories=${stats.calories}, standingHours=${stats.standingHours}',
+      );
+
       final timestamp = DateTime.now();
       final samples = <BiometricSample>[];
 
       // 4. Parse Heart Rate (most critical for lucid dreaming)
       if (stats.hasHeartRate() && stats.heartRate > 10) {
         // Ignore HR <= 10 (invalid/measuring)
+        debugPrint(
+          '   ✅ Adding Heart Rate: ${stats.heartRate} BPM',
+        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -86,6 +171,9 @@ class XiaomiSppRealtimeStatsParser {
       // 5. Parse Movement Intensity (via unknown3 - activity proxy)
       // This field increases during physical activity (Gadgetbridge finding)
       if (stats.hasUnknown3() && stats.unknown3 > 0) {
+        debugPrint(
+          '   ✅ Adding Movement: ${stats.unknown3}',
+        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -103,6 +191,9 @@ class XiaomiSppRealtimeStatsParser {
 
       // 6. Parse Steps (cumulative during session)
       if (stats.hasSteps() && stats.steps > 0) {
+        debugPrint(
+          '   ✅ Adding Steps: ${stats.steps}',
+        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -120,6 +211,9 @@ class XiaomiSppRealtimeStatsParser {
 
       // 7. Parse Calories (bonus data)
       if (stats.hasCalories() && stats.calories > 0) {
+        debugPrint(
+          '   ✅ Adding Calories: ${stats.calories}',
+        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -137,6 +231,9 @@ class XiaomiSppRealtimeStatsParser {
 
       // 8. Parse Standing Hours (bonus data) - No SensorType equivalent, use unknown
       if (stats.hasStandingHours() && stats.standingHours > 0) {
+        debugPrint(
+          '   ✅ Adding Standing Hours: ${stats.standingHours}',
+        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -153,10 +250,25 @@ class XiaomiSppRealtimeStatsParser {
       }
 
       // 9. Return null if no valid samples
-      return samples.isEmpty ? null : samples;
+      if (samples.isEmpty) {
+        debugPrint(
+          '   ⚠️  No valid samples extracted from RealTimeStats',
+        );
+        return null;
+      }
+
+      debugPrint(
+        '   ✅ Successfully parsed ${samples.length} samples',
+      );
+      return samples;
     } on Exception catch (e) {
       // Invalid protobuf or parsing error
-      debugPrint('Error parsing Xiaomi SPP realtime stats: $e');
+      debugPrint(
+        '   ❌ XiaomiSppRealtimeStatsParser caught exception: $e',
+      );
+      debugPrint(
+        '   📋 Payload (hex): ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+      );
       return null;
     }
   }
