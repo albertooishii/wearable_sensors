@@ -94,6 +94,16 @@ class _RealtimeStatsTracker {
     required int currentCalories,
     required int currentUnknown3,
   }) {
+    // ✅ First call: initialize previous values
+    if (previousSteps == null) {
+      previousSteps = currentSteps;
+      previousCalories = currentCalories;
+      previousUnknown3 = currentUnknown3;
+      previousMovementState = 0; // Start with no movement
+      return 0;
+    }
+
+    // ✅ Subsequent calls: detect if any value changed
     final currentMovement = (currentSteps != previousSteps ||
             currentCalories != previousCalories ||
             currentUnknown3 != previousUnknown3)
