@@ -115,6 +115,11 @@ class _RealtimeStatsTracker {
 
     previousMovementState = currentMovement;
 
+    // ✅ UPDATE: Save current values for next comparison
+    previousSteps = currentSteps;
+    previousCalories = currentCalories;
+    previousUnknown3 = currentUnknown3;
+
     if (changed) {
       final changeLabel = currentMovement == 1 ? 'START' : 'STOP';
       debugPrint(
