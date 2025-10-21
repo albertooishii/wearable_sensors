@@ -1,7 +1,7 @@
 {
     "version": "2.1",
     "device_type": "xiaomi_smart_band_9",
-    "display_name": "Xiaomi Smart Band 9 (FE95 Protocol V1)",
+    "display_name": "Xiaomi Smart Band 9 (SPP Auto-detect V1/V2)",
     "service_filter": [
         "0000FE95-0000-1000-8000-00805F9B34FB"
     ],
@@ -39,8 +39,42 @@
         "spp_protocol": {
             "version": "v1",
             "version_detection": {
-                "enabled": false,
-                "note": "Band 9 confirmed to use V1 only"
+                "enabled": true,
+                "send_version_request_v1": true,
+                "channel": 0,
+                "opcode": 0,
+                "timeout_ms": 5000,
+                "auto_switch_threshold": 2,
+                "note": "Send VERSION request in V1 format, parse response byte[0]. If >= 2, switch to V2. Band 9 firmware may have been updated; auto-detection ensures compatibility."
+            },
+            "v1": {
+                "packet_preamble": [
+                    186,
+                    220,
+                    254
+                ],
+                "packet_epilogue": [
+                    239
+                ],
+                "channels": {
+                    "version": 0,
+                    "proto_rx": 1,
+                    "proto_tx": 2,
+                    "authentication": 2,
+                    "fitness": 3,
+                    "voice": 4,
+                    "mass": 5,
+                    "ota": 7
+                },
+                "opcodes": {
+                    "read": 0,
+                    "send": 2
+                },
+                "data_types": {
+                    "plain": 0,
+                    "encrypted": 1,
+                    "auth": 2
+                }
             },
             "v1_note": "All SPP V1 protocol values are UNIVERSAL across Xiaomi devices (hardcoded in code). See lib/shared/services/bluetooth/xiaomi/protocol/v1/constants.dart"
         },
@@ -50,6 +84,6 @@
             "step_3": "Send CMD_AUTH (type=1, subtype=27) with encrypted device info as SPP packet",
             "step_4": "Receive confirmation (status=1 for success)"
         },
-        "notes": "Smart Band 9 uses SPP Protocol V1 (confirmed) over BLE with separate write (0051) and notify (0052) characteristics. Based on Gadgetbridge XiaomiSppProtocolV1.java"
+        "notes": "Smart Band 9 uses SPP Protocol V1 by default but can auto-detect if firmware is updated to V2 (Gadgetbridge source confirms auto-detection logic). Unlike Band 10, V1 does NOT require SESSION_CONFIG handshake. Based on Gadgetbridge XiaomiSppProtocolV1.java + XiaomiSppPacketV1.java. Both Band 9 and Band 10 use BT_CLASSIC/SPP after initial BLE authentication phase; the SPP protocol version determines packet structure."
     }
 }

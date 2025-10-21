@@ -1,7 +1,7 @@
 {
     "version": "2.1",
     "device_type": "xiaomi_smart_band_10",
-    "display_name": "Xiaomi Smart Band 10 (FE95 Protocol V2)",
+    "display_name": "Xiaomi Smart Band 10 (SPP Auto-detect V2)",
     "service_filter": [
         "0000FE95-0000-1000-8000-00805F9B34FB"
     ],
@@ -95,6 +95,6 @@
             "step_4": "Send CMD_AUTH (type=1, subtype=27) with encrypted device info as SPP V2 DATA packet",
             "step_5": "Receive confirmation (status=1 for success) as SPP V2 DATA packet → Send ACK"
         },
-        "notes": "Smart Band 10 CONFIRMED to use SPP Protocol V2 (Gadgetbridge source code MiBand10Coordinator.java). Requires session handshake before authentication. Auto-detected via VERSION request. Based on Gadgetbridge XiaomiSppProtocolV2.java + XiaomiSppPacketV2.java"
+        "notes": "Smart Band 10 CONFIRMED to use SPP Protocol V2 (Gadgetbridge source code MiBand10Coordinator.java). Requires session handshake (SESSION_CONFIG) before authentication - this is the KEY difference from V1. Auto-detected via VERSION request during auth. Based on Gadgetbridge XiaomiSppProtocolV2.java + XiaomiSppPacketV2.java. Band 9 and Band 10 both use BT_CLASSIC/SPP after BLE auth phase, but differ in packet format and SESSION_CONFIG requirement."
     }
 }
