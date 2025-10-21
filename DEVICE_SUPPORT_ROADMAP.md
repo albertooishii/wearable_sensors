@@ -106,53 +106,82 @@ JSON Config CANNOT Handle:
 
 ## 4. **Our Current Implementation Status**
 
-### ✅ Complete & Tested
-- Band 9 support (SPP V1)
-- Band 10 support (SPP V2)
-- Auto-detection between V1 and V2
+### 🎯 **MVP Scope: Xiaomi Smart Band 10 ONLY**
+
+### ✅ Complete & Tested for Band 10
+- Band 10 support (SPP V2 protocol)
 - Protobuf command sending (clock, language, vibration)
 - Battery and realtime stats parsing
+- Auto-detection infrastructure in place
 
-### 🟡 Partial / Needs Refinement
-- V2 SESSION_CONFIG handling (structure exists, needs testing)
-- Packet ACK logic for V2 (identified but not fully verified)
+### 🟡 Future: Band 9 Support (Post-MVP)
+- Band 9 support (SPP V1) - requires different auth characteristics (0051/0052)
+- Auto-detection between V1 and V2 - **Band 9 V2 will auto-upgrade and use same code as Band 10**
 - Error recovery for version mismatch
 
-### ❌ Not Implemented
-- Band 6/7/8 FE95 protocol (architecture exists, incomplete)
+### ❌ Not in Scope (Future Investigation)
+- Band 6/7/8 FE95 protocol (requires BLE FE95 characteristics, not SPP)
 - Band 6/7/8 command support (unknown if possible)
 - Other Xiaomi device families
+- Band 9 V1 legacy support (too old, firmware should upgrade to V2)
 
 ---
 
-## 5. **Recommendation Matrix**
+## 5. **MVP vs Future Roadmap**
 
-| Feature | Effort | Value | ROI | Priority |
-|---------|--------|-------|-----|----------|
-| Verify Band 9→Band 10 works | 🟢 2h | 🔴 High | ⭐⭐⭐⭐⭐ | 1️⃣ |
-| Band 9 firmware V1→V2 upgrade support | 🟡 4h | 🟢 Medium | ⭐⭐⭐⭐ | 2️⃣ |
-| Band 6/7/8 basic data reading | 🔴 20h | 🟢 Medium | ⭐⭐⭐ | 3️⃣ |
-| Band 6/7/8 device commands | 🔴 40h | 🟡 Low | ⭐⭐ | 4️⃣ |
-| Other Xiaomi devices (Band 1-5, etc) | 🔴🔴 Unknown | 🔴 Low | ⭐ | 5️⃣ |
+### 🎯 MVP (Current Sprint)
+**Device**: Xiaomi Smart Band 10 only
+- ✅ SPP V2 protocol (SESSION_CONFIG + full protobuf)
+- ✅ Device commands (clock sync, language, vibration)
+- ✅ Battery + realtime stats reading
+- ✅ Clean error handling for Band 10-specific cases
+
+**Why Band 10 only for MVP?**
+- It's the primary device being tested
+- SPP V2 is the most recent/stable protocol
+- Band 9 V2 will work automatically once Band 9 support is added
+- No need to support legacy V1 right now
+
+### 🔄 Post-MVP Expansion
+**Phase 1 (Week 2-3)**: Add Band 9 Support
+- Reason: Band 9 V2 firmware exists and uses same SPP V2 protocol
+- Effort: 4-6 hours (just different BLE auth characteristics 0051/0052)
+- Benefit: Support users with updated Band 9 devices
+
+**Phase 2 (Month 2)**: Investigate Band 6/7/8
+- Research: Can they send device commands (unknown)?
+- Effort: 10-20 hours just for research + basic support
+- Decision: Proceed only if commands are feasible
+
+**Phase 3+**: Other devices (Xiaomi devices, other brands)
 
 ---
 
-## 6. **Next Steps**
+## 6. **Recommendation Matrix - MVP Focused**
 
-### Immediate (This Week)
-1. ✅ Add auto-detection to Band 9 (DONE - in JSON)
-2. Test Band 9↔Band 10 switching behavior
-3. Verify SESSION_CONFIG handshake works
+| Feature | MVP | Priority | Effort | Value |
+|---------|-----|----------|--------|-------|
+| Band 10 SPP V2 support | ✅ IN | 1️⃣ | 0h | ⭐⭐⭐⭐⭐ |
+| Band 10 testing | 🟡 TBD | 1️⃣ | 4h | ⭐⭐⭐⭐⭐ |
+| Band 9 V2 support | ❌ OUT | 2️⃣ | 6h | ⭐⭐⭐⭐ |
+| Band 6/7/8 research | ❌ OUT | 3️⃣ | 20h | ⭐⭐⭐ |
+| Other devices | ❌ OUT | 4️⃣+ | ??? | ⭐ |
 
-### Short-term (Next 2 Weeks)
-1. Document final protocol differences
-2. Create test matrix (Band 9 only / Band 10 only / both)
-3. Add safety guards for protocol mismatches
+---
 
-### Medium-term (If Needed)
-1. Complete FE95 parser implementations for Band 6/7/8
-2. Research if Band 6/7/8 support device commands
-3. Implement Band 6/7/8 basic support (read-only)
+## 7. **Next Steps**
+
+### For MVP Completion
+1. ✅ Verify Band 10 SPP V2 protocol implementation
+2. ✅ Test with actual Band 10 device
+3. ✅ Validate device commands work (clock, language, vibration)
+4. ✅ Clean up error handling for Band 10-specific edge cases
+
+### Architecture Notes
+- **One device, one protocol** = simpler codebase for MVP
+- **No conditional protocol logic** = Band 10 always uses V2
+- **No legacy support** = cleaner, more maintainable code
+- **Easy to expand later** = Band 9 just needs different auth UUID handling
 
 ---
 

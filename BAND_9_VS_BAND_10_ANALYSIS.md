@@ -217,6 +217,34 @@ Our JSON files now correctly document:
 
 ---
 
+## MVP Status & Future Support
+
+### Current (MVP)
+- 🎯 **Band 10 only** - SPP V2, stable, well-defined
+- ✅ All features implemented and testable
+- ✅ No conditional protocol logic needed
+
+### Future (Post-MVP)
+- 📅 **Band 9 support** - Auto-detection ready, Band 9 V2 uses identical SPP V2 after auth
+  - Just need to handle different BLE auth UUIDs (0051/0052 instead of 005E/005F)
+  - Band 9 V1 will auto-upgrade to V2 transparently
+  - ~4-6 hours of additional work
+  
+- ❌ **Band 6/7/8 not viable** - Completely different transport (BLE FE95, not SPP)
+  - Would require ~40-60 hours of implementation
+  - Need to research if commands are even supported
+  - Deferred indefinitely unless high business value
+
 ## Conclusion
 
-**Band 9 and Band 10 are 95% compatible** at the architecture level, differing only in SPP protocol version. The implementation correctly handles version detection, allowing automatic adaptation to firmware updates. However, supporting **Band 6/7/8 would require a completely new implementation** due to their use of BLE with the FE95 protocol instead of BT_CLASSIC SPP.
+**Band 9 and Band 10 are 95% compatible** at the architecture level, differing only in:
+1. BLE authentication characteristics (UUIDs)
+2. SPP protocol version (V1 vs V2)
+
+For **MVP purposes**, focusing on **Band 10 only** is optimal because:
+- ✅ Single protocol version (V2) - no conditionals
+- ✅ Well-defined and stable
+- ✅ Auto-detection infrastructure supports future Band 9 expansion
+- ✅ Band 9 support can be added post-MVP with minimal changes
+
+Supporting **Band 6/7/8 would require a completely new implementation** due to their use of BLE with the FE95 protocol instead of BT_CLASSIC SPP. This is fundamentally different architecture, not just configuration.
