@@ -43,6 +43,9 @@ enum SensorType {
   /// Movement intensity (0.0-1.0 or accelerometer data)
   movement,
 
+  /// Binary movement detection (0 = no movement, 1 = movement detected)
+  movementDetected,
+
   /// Raw accelerometer X-axis data
   accelerometerX,
 
@@ -85,6 +88,8 @@ extension SensorTypeExtension on SensorType {
         return 'Respiratory Rate';
       case SensorType.movement:
         return 'Movement';
+      case SensorType.movementDetected:
+        return 'Movement Detected';
       case SensorType.accelerometerX:
         return 'Accelerometer X';
       case SensorType.accelerometerY:
@@ -123,6 +128,8 @@ extension SensorTypeExtension on SensorType {
         return 'Frecuencia Respiratoria';
       case SensorType.movement:
         return 'Movimiento';
+      case SensorType.movementDetected:
+        return 'Movimiento Detectado';
       case SensorType.accelerometerX:
         return 'Acelerómetro X';
       case SensorType.accelerometerY:
@@ -161,6 +168,8 @@ extension SensorTypeExtension on SensorType {
         return 'bpm';
       case SensorType.movement:
         return '';
+      case SensorType.movementDetected:
+        return '';
       case SensorType.accelerometerX:
       case SensorType.accelerometerY:
       case SensorType.accelerometerZ:
@@ -197,6 +206,8 @@ extension SensorTypeExtension on SensorType {
         return '🌬️';
       case SensorType.movement:
         return '🏃‍♂️';
+      case SensorType.movementDetected:
+        return '🚨';
       case SensorType.accelerometerX:
       case SensorType.accelerometerY:
       case SensorType.accelerometerZ:
@@ -254,6 +265,8 @@ extension SensorTypeExtension on SensorType {
         return 'respiratory_rate';
       case SensorType.movement:
         return 'movement';
+      case SensorType.movementDetected:
+        return 'movement_detected';
       case SensorType.accelerometerX:
         return 'accelerometer_x';
       case SensorType.accelerometerY:

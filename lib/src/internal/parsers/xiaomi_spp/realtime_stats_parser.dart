@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/rendering.dart';
+import 'dart:math';
 
 import 'package:wearable_sensors/src/api/enums/sensor_type.dart';
 import '../../models/biometric_sample.dart';
@@ -54,6 +55,10 @@ class _RealtimeStatsTracker {
   int? previousUnknown5;
   int? previousCalories;
 
+  // ✨ NEW: Track HR history for HRV calculation
+  final List<int> _hrHistory = [];
+  static const int _maxHrHistorySize = 120; // ~2 minutes at 1Hz
+
   bool isUnknown3Updated(int current) {
     final updated = previousUnknown3 != current;
     previousUnknown3 = current;
@@ -77,6 +82,92 @@ class _RealtimeStatsTracker {
     previousCalories = current;
     return updated;
   }
+
+  // ✨ NEW: Track movement as binary (0 = no movement, 1 = movement detected)
+  int? previousMovementState;
+
+  /// Detect if movement has changed (binary detector)
+  /// Movement = 1 if ANY of (steps, calories, unknown3) changed
+  /// Movement = 0 if NONE changed
+  int detectMovementChange({
+    required int currentSteps,
+    required int currentCalories,
+    required int currentUnknown3,
+  }) {
+    final currentMovement = (currentSteps != previousSteps ||
+            currentCalories != previousCalories ||
+            currentUnknown3 != previousUnknown3)
+        ? 1
+        : 0;
+
+    final changed = previousMovementState != null &&
+        previousMovementState != currentMovement;
+
+    previousMovementState = currentMovement;
+
+    if (changed) {
+      final changeLabel = currentMovement == 1 ? 'START' : 'STOP';
+      debugPrint(
+        '   📊 MOVEMENT DETECTOR: $changeLabel MOVEMENT (binary: $currentMovement)',
+      );
+    }
+
+    return currentMovement;
+  }
+
+  /// ✨ NEW: Calculate HRV from HR history (Heart Rate Variability)
+  ///
+  /// HRV = standard deviation of RR intervals (time between beats)
+  /// Approximation from equally-sampled HR values
+  /// - Low HRV (<5) = deep sleep, parasympathetic dominant
+  /// - Medium HRV (5-20) = light sleep, balanced
+  /// - High HRV (>20) = REM/stress, sympathetic active, low parasympathetic
+  double calculateHRV(int currentHR) {
+    // Add current HR to history
+    _hrHistory.add(currentHR);
+
+    // Keep only last 120 samples (~2 minutes)
+    if (_hrHistory.length > _maxHrHistorySize) {
+      _hrHistory.removeAt(0);
+    }
+
+    // Need at least 10 samples to calculate meaningful HRV
+    if (_hrHistory.length < 10) {
+      return 0.0;
+    }
+
+    // Calculate RR intervals (simplified: 60000 / HR in milliseconds)
+    final rrIntervals = <double>[];
+    for (final hr in _hrHistory) {
+      if (hr > 0) {
+        final rrInterval = 60000.0 / hr; // Convert BPM to RR interval (ms)
+        rrIntervals.add(rrInterval);
+      }
+    }
+
+    if (rrIntervals.length < 2) {
+      return 0.0;
+    }
+
+    // Calculate mean RR interval
+    final meanRR = rrIntervals.reduce((a, b) => a + b) / rrIntervals.length;
+
+    // Calculate standard deviation (SDNN - HRV metric)
+    final variance = rrIntervals
+            .map((rr) => (rr - meanRR) * (rr - meanRR))
+            .reduce((a, b) => a + b) /
+        rrIntervals.length;
+
+    final hrv = (variance >= 0) ? sqrt(variance) : 0.0;
+
+    return hrv;
+  }
+
+  /// Get HR history for trend analysis
+  List<int> getHRHistory() => List.unmodifiable(_hrHistory);
+
+  /// Clear HRV history (e.g., when session ends)
+  void clearHRHistory() => _hrHistory.clear();
 }
 
 class XiaomiSppRealtimeStatsParser {
@@ -142,60 +233,33 @@ class XiaomiSppRealtimeStatsParser {
       }
 
       final stats = command.health.realTimeStats;
-      // Enhanced detailed logging for movement and unknown values
+
+      // ✨ DEBUG: Print raw protobuf data (single line for easier grepping)
       if (stats.heartRate > 0 || stats.unknown3 > 0 || stats.steps > 0) {
-        final movementClassification =
-            classifyMovementLevel(stats.unknown3.toDouble());
-        final hrZone = classifyHeartRateZone(stats.heartRate.toDouble());
-        final now = DateTime.now();
-        final timestamp =
-            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-
-        // Track changes using singleton tracker
-        final tracker = _RealtimeStatsTracker();
-        final unknown3Updated = tracker.isUnknown3Updated(stats.unknown3);
-        final stepsUpdated = tracker.isStepsUpdated(stats.steps);
-        final caloriesUpdated = tracker.isCaloriesUpdated(stats.calories);
-        final unknown5Updated = tracker.isUnknown5Updated(stats.unknown5);
-
-        // DEBUG: Print raw protobuf data (single line for easier grepping)
         debugPrint(
           '   🔍 DEBUG: Raw RealTimeStats: HR=${stats.heartRate}(0x${stats.heartRate.toRadixString(16)}) unknown3=${stats.unknown3}(0x${stats.unknown3.toRadixString(16)}) steps=${stats.steps}(0x${stats.steps.toRadixString(16)}) calories=${stats.calories}(0x${stats.calories.toRadixString(16)}) unknown5=${stats.unknown5}(0x${stats.unknown5.toRadixString(16)}) standingHours=${stats.standingHours}(0x${stats.standingHours.toRadixString(16)})',
         );
-
-        // ======================= REALTIME STATS =======================
-        debugPrint('');
-        debugPrint(
-          '======================= REALTIME STATS [$timestamp] =======================',
-        );
-        debugPrint('HR (Heart Rate): ${stats.heartRate} bpm');
-        debugPrint('HR Zone: $hrZone');
-        final unknown3Tag = unknown3Updated ? ' (updated)' : '';
-        // DEBUG: Print raw bytes to verify no parsing issues
-        debugPrint(
-          'unknown3 (Movement Intensity): ${stats.unknown3} (0x${stats.unknown3.toRadixString(16)}) [${movementClassification.toUpperCase()}]$unknown3Tag',
-        );
-        final stepsTag = stepsUpdated ? ' (updated)' : '';
-        debugPrint('Steps (cumulative): ${stats.steps}$stepsTag');
-        final caloriesTag = caloriesUpdated ? ' (updated)' : '';
-        debugPrint(
-          'Calories: ${stats.calories} kcal (0x${stats.calories.toRadixString(16)})$caloriesTag',
-        );
-        if (stats.hasStandingHours()) {
-          debugPrint('Standing Hours: ${stats.standingHours}h');
-        }
-        if (stats.hasUnknown5()) {
-          final unknown5Tag = unknown5Updated ? ' (updated)' : '';
-          debugPrint(
-            'unknown5 (possibly moving time): ${stats.unknown5} (0x${stats.unknown5.toRadixString(16)})$unknown5Tag',
-          );
-        }
-        debugPrint('==============================');
-        debugPrint('');
       }
 
       final timestamp = DateTime.now();
       final samples = <BiometricSample>[];
+
+      // ✨ NEW: Calculate HRV and detect movement (for all samples)
+      final tracker = _RealtimeStatsTracker();
+      double hrv = 0.0;
+      int movementBinary = 0;
+
+      if (stats.hasHeartRate() && stats.heartRate > 10) {
+        hrv = tracker.calculateHRV(stats.heartRate);
+      }
+
+      if (stats.hasSteps() || stats.hasCalories() || stats.hasUnknown3()) {
+        movementBinary = tracker.detectMovementChange(
+          currentSteps: stats.steps,
+          currentCalories: stats.calories,
+          currentUnknown3: stats.unknown3,
+        );
+      }
 
       // 4. Parse Heart Rate (most critical for lucid dreaming)
       if (stats.hasHeartRate() && stats.heartRate > 10) {
@@ -213,7 +277,44 @@ class XiaomiSppRealtimeStatsParser {
             },
           ),
         );
+
+        // ✨ NEW: Add HRV sample
+        samples.add(
+          BiometricSample(
+            timestamp: timestamp,
+            value: hrv,
+            sensorType: SensorType.heartRateVariability,
+            metadata: {
+              'unit': 'ms',
+              'source': 'xiaomi_spp_hrv_calculation',
+              'transport': 'bt_classic',
+              'data_type_name': 'hrv_sdnn',
+              'note':
+                  'Standard deviation of RR intervals (calculated from HR history)',
+              'interpretation': hrv < 5
+                  ? 'deep_sleep'
+                  : (hrv < 20 ? 'light_sleep' : 'rem_or_stressed'),
+            },
+          ),
+        );
       }
+
+      // ✨ NEW: Add binary movement detection
+      samples.add(
+        BiometricSample(
+          timestamp: timestamp,
+          value: movementBinary.toDouble(),
+          sensorType: SensorType.movementDetected,
+          metadata: {
+            'unit': 'binary',
+            'source': 'xiaomi_spp_movement_detector',
+            'transport': 'bt_classic',
+            'data_type_name': 'movement_detected',
+            'note':
+                '1=movement detected (steps|calories|unknown3 changed), 0=no movement',
+          },
+        ),
+      );
 
       // 5. Parse Movement Intensity (via unknown3 - activity proxy)
       // This field increases during physical activity (Gadgetbridge finding)
