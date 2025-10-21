@@ -773,13 +773,13 @@ class XiaomiAuthService {
 
       final payload = Uint8List.fromList(command.writeToBuffer());
 
-      debugPrint('📦 SPP V2: Protobuf Command details:');
+      /*debugPrint('📦 SPP V2: Protobuf Command details:');
       debugPrint('   Type: $_commandTypeAuth (AUTH)');
       debugPrint('   Subtype: $_cmdNonce (NONCE)');
       debugPrint('   Payload length: ${payload.length} bytes');
       debugPrint(
         '   Payload hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      );*/
 
       // ✅ Route to correct handler: BLE (sppV2Handler) or BT_CLASSIC (sppService)
       if (sppService != null) {
@@ -827,17 +827,17 @@ class XiaomiAuthService {
   /// Decodes protobuf Command and routes to appropriate handler.
   void _handleAuthDataV2(final Uint8List data) {
     try {
-      debugPrint('🔐 SPP V2: Decoding auth data (${data.length} bytes)');
+      /*debugPrint('🔐 SPP V2: Decoding auth data (${data.length} bytes)');
       debugPrint(
         '   📥 Raw data hex: ${data.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      );*/
 
       // Decode protobuf Command
       final command = pb.Command.fromBuffer(data);
-      debugPrint(
+      /*debugPrint(
         '📦 SPP V2: Received command type=${command.type}, subtype=${command.subtype}',
       );
-      debugPrint('   hasAuth: ${command.hasAuth()}');
+      debugPrint('   hasAuth: ${command.hasAuth()}');*/
       if (command.hasAuth()) {
         debugPrint('   hasWatchNonce: ${command.auth.hasWatchNonce()}');
         debugPrint('   hasPhoneNonce: ${command.auth.hasPhoneNonce()}');
@@ -880,18 +880,18 @@ class XiaomiAuthService {
   /// Decodes protobuf Command and routes to _handleSystemCommandResponse().
   void _handleSystemCommandDataV2(final Uint8List data) {
     try {
-      debugPrint(
+      /*debugPrint(
         '🔋 SPP V2: Decoding system command data (${data.length} bytes)',
       );
       debugPrint(
         '   📥 Raw data hex: ${data.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      );*/
 
       // Decode protobuf Command
       final command = pb.Command.fromBuffer(data);
-      debugPrint(
+      /*debugPrint(
         '📦 SPP V2: Received system command type=${command.type}, subtype=${command.subtype}',
-      );
+      );*/
 
       // Route to system command handler
       _handleSystemCommandResponse(command);

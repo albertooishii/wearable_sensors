@@ -37,6 +37,48 @@ import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
 ///   }
 /// }
 /// ```
+
+/// Singleton to track previous values for change detection
+class _RealtimeStatsTracker {
+  static final _RealtimeStatsTracker _instance =
+      _RealtimeStatsTracker._internal();
+
+  factory _RealtimeStatsTracker() {
+    return _instance;
+  }
+
+  _RealtimeStatsTracker._internal();
+
+  int? previousUnknown3;
+  int? previousSteps;
+  int? previousUnknown5;
+  int? previousCalories;
+
+  bool isUnknown3Updated(int current) {
+    final updated = previousUnknown3 != current;
+    previousUnknown3 = current;
+    return updated;
+  }
+
+  bool isStepsUpdated(int current) {
+    final updated = previousSteps != current;
+    previousSteps = current;
+    return updated;
+  }
+
+  bool isUnknown5Updated(int current) {
+    final updated = previousUnknown5 != current;
+    previousUnknown5 = current;
+    return updated;
+  }
+
+  bool isCaloriesUpdated(int current) {
+    final updated = previousCalories != current;
+    previousCalories = current;
+    return updated;
+  }
+}
+
 class XiaomiSppRealtimeStatsParser {
   /// Parse realtime stats from SPP protobuf bytes
   ///
@@ -57,21 +99,8 @@ class XiaomiSppRealtimeStatsParser {
       // then attempt to find an embedded protobuf by scanning small offsets.
       pb.Command command;
       try {
-        debugPrint(
-          '   🔍 Attempting direct protobuf decode...',
-        );
         command = pb.Command.fromBuffer(Uint8List.fromList(bytes));
-        debugPrint(
-          '   ✅ Direct decode successful: type=${command.type}, subtype=${command.subtype}',
-        );
       } catch (e) {
-        debugPrint(
-          '   ⚠️  Direct decode failed: $e',
-        );
-        debugPrint(
-          '   🔍 Scanning for embedded protobuf at offsets 1-31...',
-        );
-
         // Attempt to locate embedded protobuf by scanning offsets up to 32 bytes
         bool parsed = false;
         command = pb.Command();
@@ -84,9 +113,6 @@ class XiaomiSppRealtimeStatsParser {
             if (candidate.type >= 0 && candidate.type <= 15) {
               command = candidate;
               parsed = true;
-              debugPrint(
-                '   ✅ Found embedded protobuf at offset $offset: type=${command.type}, subtype=${command.subtype}',
-              );
               break;
             }
           } on Exception {
@@ -95,54 +121,78 @@ class XiaomiSppRealtimeStatsParser {
         }
 
         if (!parsed) {
-          debugPrint(
-            '   ❌ No valid protobuf found at any offset',
-          );
-          debugPrint(
-            '   📋 Payload (hex): ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-          );
           // Rethrow original error to be handled by outer catch
           rethrow;
         }
       }
 
       // 2. Validate command type (Health service, realtime event)
-      debugPrint(
-        '   🔍 Validating command type: expecting (8, 47), got (${command.type}, ${command.subtype})',
-      );
       if (command.type != 8 || command.subtype != 47) {
         // Not a realtime stats event
-        debugPrint(
-          '   ⚠️  Not a realtime stats event (type=${command.type}, subtype=${command.subtype})',
-        );
         return null;
       }
 
       // 3. Extract RealTimeStats
-      debugPrint(
-        '   🔍 Checking for Health and RealTimeStats fields...',
-      );
       if (!command.hasHealth()) {
-        debugPrint(
-          '   ⚠️  Command has no Health field',
-        );
         return null;
       }
 
       if (!command.health.hasRealTimeStats()) {
-        debugPrint(
-          '   ⚠️  Health has no RealTimeStats field',
-        );
         return null;
       }
 
       final stats = command.health.realTimeStats;
-      debugPrint(
-        '   ✅ Successfully extracted RealTimeStats',
-      );
-      debugPrint(
-        '   📊 Fields: HR=${stats.heartRate}, steps=${stats.steps}, unknown3=${stats.unknown3}, calories=${stats.calories}, standingHours=${stats.standingHours}',
-      );
+      // Enhanced detailed logging for movement and unknown values
+      if (stats.heartRate > 0 || stats.unknown3 > 0 || stats.steps > 0) {
+        final movementClassification =
+            classifyMovementLevel(stats.unknown3.toDouble());
+        final hrZone = classifyHeartRateZone(stats.heartRate.toDouble());
+        final now = DateTime.now();
+        final timestamp =
+            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+
+        // Track changes using singleton tracker
+        final tracker = _RealtimeStatsTracker();
+        final unknown3Updated = tracker.isUnknown3Updated(stats.unknown3);
+        final stepsUpdated = tracker.isStepsUpdated(stats.steps);
+        final caloriesUpdated = tracker.isCaloriesUpdated(stats.calories);
+        final unknown5Updated = tracker.isUnknown5Updated(stats.unknown5);
+
+        // DEBUG: Print raw protobuf data (single line for easier grepping)
+        debugPrint(
+          '   🔍 DEBUG: Raw RealTimeStats: HR=${stats.heartRate}(0x${stats.heartRate.toRadixString(16)}) unknown3=${stats.unknown3}(0x${stats.unknown3.toRadixString(16)}) steps=${stats.steps}(0x${stats.steps.toRadixString(16)}) calories=${stats.calories}(0x${stats.calories.toRadixString(16)}) unknown5=${stats.unknown5}(0x${stats.unknown5.toRadixString(16)}) standingHours=${stats.standingHours}(0x${stats.standingHours.toRadixString(16)})',
+        );
+
+        // ======================= REALTIME STATS =======================
+        debugPrint('');
+        debugPrint(
+          '======================= REALTIME STATS [$timestamp] =======================',
+        );
+        debugPrint('HR (Heart Rate): ${stats.heartRate} bpm');
+        debugPrint('HR Zone: $hrZone');
+        final unknown3Tag = unknown3Updated ? ' (updated)' : '';
+        // DEBUG: Print raw bytes to verify no parsing issues
+        debugPrint(
+          'unknown3 (Movement Intensity): ${stats.unknown3} (0x${stats.unknown3.toRadixString(16)}) [${movementClassification.toUpperCase()}]$unknown3Tag',
+        );
+        final stepsTag = stepsUpdated ? ' (updated)' : '';
+        debugPrint('Steps (cumulative): ${stats.steps}$stepsTag');
+        final caloriesTag = caloriesUpdated ? ' (updated)' : '';
+        debugPrint(
+          'Calories: ${stats.calories} kcal (0x${stats.calories.toRadixString(16)})$caloriesTag',
+        );
+        if (stats.hasStandingHours()) {
+          debugPrint('Standing Hours: ${stats.standingHours}h');
+        }
+        if (stats.hasUnknown5()) {
+          final unknown5Tag = unknown5Updated ? ' (updated)' : '';
+          debugPrint(
+            'unknown5 (possibly moving time): ${stats.unknown5} (0x${stats.unknown5.toRadixString(16)})$unknown5Tag',
+          );
+        }
+        debugPrint('==============================');
+        debugPrint('');
+      }
 
       final timestamp = DateTime.now();
       final samples = <BiometricSample>[];
@@ -150,9 +200,6 @@ class XiaomiSppRealtimeStatsParser {
       // 4. Parse Heart Rate (most critical for lucid dreaming)
       if (stats.hasHeartRate() && stats.heartRate > 10) {
         // Ignore HR <= 10 (invalid/measuring)
-        debugPrint(
-          '   ✅ Adding Heart Rate: ${stats.heartRate} BPM',
-        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -171,9 +218,6 @@ class XiaomiSppRealtimeStatsParser {
       // 5. Parse Movement Intensity (via unknown3 - activity proxy)
       // This field increases during physical activity (Gadgetbridge finding)
       if (stats.hasUnknown3() && stats.unknown3 > 0) {
-        debugPrint(
-          '   ✅ Adding Movement: ${stats.unknown3}',
-        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -191,9 +235,6 @@ class XiaomiSppRealtimeStatsParser {
 
       // 6. Parse Steps (cumulative during session)
       if (stats.hasSteps() && stats.steps > 0) {
-        debugPrint(
-          '   ✅ Adding Steps: ${stats.steps}',
-        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -211,9 +252,6 @@ class XiaomiSppRealtimeStatsParser {
 
       // 7. Parse Calories (bonus data)
       if (stats.hasCalories() && stats.calories > 0) {
-        debugPrint(
-          '   ✅ Adding Calories: ${stats.calories}',
-        );
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -249,11 +287,29 @@ class XiaomiSppRealtimeStatsParser {
         );
       }
 
-      // 9. Return null if no valid samples
-      if (samples.isEmpty) {
-        debugPrint(
-          '   ⚠️  No valid samples extracted from RealTimeStats',
+      // 9. Parse unknown5 (probably moving time or time counter)
+      // Gadgetbridge: "0 probably moving time"
+      // This field needs investigation - logging for data collection
+      if (stats.hasUnknown5()) {
+        samples.add(
+          BiometricSample(
+            timestamp: timestamp,
+            value: stats.unknown5.toDouble(),
+            sensorType: SensorType.unknown,
+            metadata: {
+              'unit': 'unknown',
+              'source': 'xiaomi_spp_realtime',
+              'transport': 'bt_classic',
+              'data_type_name': 'unknown5_investigation',
+              'note':
+                  'Gadgetbridge says: "0 probably moving time" - needs investigation',
+            },
+          ),
         );
+      }
+
+      // 10. Return null if no valid samples
+      if (samples.isEmpty) {
         return null;
       }
 
@@ -261,14 +317,14 @@ class XiaomiSppRealtimeStatsParser {
         '   ✅ Successfully parsed ${samples.length} samples',
       );
       return samples;
-    } on Exception catch (e) {
+    } on Exception {
       // Invalid protobuf or parsing error
-      debugPrint(
-        '   ❌ XiaomiSppRealtimeStatsParser caught exception: $e',
-      );
-      debugPrint(
-        '   📋 Payload (hex): ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      // debugPrint(
+      //   '   ❌ XiaomiSppRealtimeStatsParser caught exception: $e',
+      // );
+      // debugPrint(
+      //   '   📋 Payload (hex): ${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+      // );
       return null;
     }
   }

@@ -356,9 +356,9 @@ abstract class SppV2Packet {
   /// Decode packet from bytes
   static SppV2Packet? decode(final Uint8List bytes) {
     if (bytes.length < 8) {
-      debugPrint(
-        '🔍 SPP V2: Not enough bytes to decode packet (need 8, got ${bytes.length})',
-      );
+      // debugPrint(
+      //   '🔍 SPP V2: Not enough bytes to decode packet (need 8, got ${bytes.length})',
+      // );
       return null;
     }
 
@@ -368,7 +368,7 @@ abstract class SppV2Packet {
     final preamble = _preamble;
     if (buffer.getUint8(0) != preamble[0] ||
         buffer.getUint8(1) != preamble[1]) {
-      debugPrint('⚠️ SPP V2: Invalid preamble');
+      // debugPrint('⚠️ SPP V2: Invalid preamble');
       return null;
     }
 
@@ -379,9 +379,9 @@ abstract class SppV2Packet {
         byte & 0x0F; // ✅ Mask with 0x0F to extract lower 4 bits
     final packetType = PacketType.fromValue(packetTypeValue);
     if (packetType == null) {
-      debugPrint(
-        '⚠️ SPP V2: Unknown packet type $packetTypeValue (byte: $byte, masked: ${byte & 0x0F})',
-      );
+      // debugPrint(
+      //   '⚠️ SPP V2: Unknown packet type $packetTypeValue (byte: $byte, masked: ${byte & 0x0F})',
+      // );
       return null;
     }
 
@@ -391,9 +391,9 @@ abstract class SppV2Packet {
 
     final totalSize = 8 + packetSize;
     if (bytes.length < totalSize) {
-      debugPrint(
-        '🔍 SPP V2: Incomplete packet (need $totalSize, got ${bytes.length})',
-      );
+      // debugPrint(
+      //   '🔍 SPP V2: Incomplete packet (need $totalSize, got ${bytes.length})',
+      // );
       return null;
     }
 
@@ -402,9 +402,9 @@ abstract class SppV2Packet {
     // Verify checksum using the SAME algorithm as encode()
     final calculatedChecksum = _staticCalculateChecksum(payload);
     if (checksum != calculatedChecksum) {
-      debugPrint(
-        '⚠️ SPP V2: Checksum mismatch (expected $checksum, got $calculatedChecksum)',
-      );
+      // debugPrint(
+      //   '⚠️ SPP V2: Checksum mismatch (expected $checksum, got $calculatedChecksum)',
+      // );
       // Continue anyway (some devices may have checksum issues)
     }
 
@@ -416,7 +416,7 @@ abstract class SppV2Packet {
     } else if (packetType == PacketType.data) {
       return DataPacket.fromPayload(sequenceNumber, payload);
     } else {
-      debugPrint('⚠️ SPP V2: Unknown packet type $packetTypeValue');
+      // debugPrint('⚠️ SPP V2: Unknown packet type $packetTypeValue');
       return null;
     }
   }
@@ -606,15 +606,15 @@ class DataPacket extends SppV2Packet {
     if (!encrypted) return payload;
 
     if (encryptionKeys == null) {
-      debugPrint('⚠️ SPP V2: Cannot decrypt - no encryption keys provided');
+      // debugPrint('⚠️ SPP V2: Cannot decrypt - no encryption keys provided');
       return payload;
     }
 
-    debugPrint('🔐 SPP V2: Decrypting INCOMING payload using AES-CTR');
-    debugPrint('   Encrypted payload: ${payload.length} bytes');
-    debugPrint(
-      '   decryptionKey: ${encryptionKeys.decryptionKey.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-    );
+    // debugPrint('🔐 SPP V2: Decrypting INCOMING payload using AES-CTR');
+    // debugPrint('   Encrypted payload: ${payload.length} bytes');
+    // debugPrint(
+    //   '   decryptionKey: ${encryptionKeys.decryptionKey.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+    // );
 
     try {
       // Gadgetbridge V2 uses AES-CTR with decryptionKey as BOTH key and IV!
@@ -626,35 +626,35 @@ class DataPacket extends SppV2Packet {
         payload,
       );
 
-      debugPrint(
-        '   ✅ Decrypted ${payload.length} → ${decrypted.length} bytes',
-      );
-      debugPrint(
-        '   Decrypted hex: ${decrypted.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      // debugPrint(
+      //   '   ✅ Decrypted ${payload.length} → ${decrypted.length} bytes',
+      // );
+      // debugPrint(
+      //   '   Decrypted hex: ${decrypted.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+      // );
 
       return decrypted;
-    } on Exception catch (e) {
-      debugPrint('❌ AES-CTR decryption failed: $e');
+    } on Exception {
+      // debugPrint('❌ AES-CTR decryption failed: $e');
       return payload; // Return encrypted if decryption fails
     }
   }
 
   @override
   Uint8List getPacketPayloadBytes({final EncryptionKeys? encryptionKeys}) {
-    debugPrint('🔍 DEBUG DataPacket: getPacketPayloadBytes called');
-    debugPrint('   channel: $channel');
-    debugPrint('   opcode: ${opcode.name} (value=${opcode.value})');
-    debugPrint('   encrypted: $encrypted');
-    debugPrint('   encryptionKeys provided: ${encryptionKeys != null}');
-    if (encryptionKeys != null) {
-      debugPrint(
-        '   encryptionKey length: ${encryptionKeys.encryptionKey.length}',
-      );
-      debugPrint(
-        '   encryptionNonce length: ${encryptionKeys.encryptionNonce.length}',
-      );
-    }
+    // debugPrint('🔍 DEBUG DataPacket: getPacketPayloadBytes called');
+    // debugPrint('   channel: $channel');
+    // debugPrint('   opcode: ${opcode.name} (value=${opcode.value})');
+    // debugPrint('   encrypted: $encrypted');
+    // debugPrint('   encryptionKeys provided: ${encryptionKeys != null}');
+    // if (encryptionKeys != null) {
+    //   debugPrint(
+    //     '   encryptionKey length: ${encryptionKeys.encryptionKey.length}',
+    //   );
+    //   debugPrint(
+    //     '   encryptionNonce length: ${encryptionKeys.encryptionNonce.length}',
+    //   );
+    // }
 
     final buffer = <int>[];
 
@@ -670,16 +670,16 @@ class DataPacket extends SppV2Packet {
     // They simply use opcode value (1 or 2) and decide encryption based on opcode == OPCODE_SEND_ENCRYPTED
     // See XiaomiSppPacketV2.java:374: buffer.put((byte) (opCode & 0xff));
     final opcodeValue = opcode.value;
-    debugPrint(
-      '   opcode value: $opcodeValue (0x${opcodeValue.toRadixString(16)})',
-    );
+    // debugPrint(
+    //   '   opcode value: $opcodeValue (0x${opcodeValue.toRadixString(16)})',
+    // );
     buffer.add(opcodeValue);
 
     // Payload (with optional encryption)
     if (encrypted) {
       if (encryptionKeys != null) {
-        debugPrint('🔐 SPP V2: Encrypting payload using AES-CTR');
-        debugPrint('   Original payload: ${payload.length} bytes');
+        // debugPrint('🔐 SPP V2: Encrypting payload using AES-CTR');
+        // debugPrint('   Original payload: ${payload.length} bytes');
 
         try {
           // Gadgetbridge V2 uses AES-CTR with encryptionKey as BOTH key and IV!
@@ -691,17 +691,17 @@ class DataPacket extends SppV2Packet {
             payload,
           );
 
-          debugPrint('   Encrypted payload: ${encryptedPayload.length} bytes');
+          // debugPrint('   Encrypted payload: ${encryptedPayload.length} bytes');
           buffer.addAll(encryptedPayload);
-        } on Exception catch (e) {
-          debugPrint('❌ SPP V2: Encryption failed: $e');
-          debugPrint('   Falling back to plain payload (INSECURE!)');
+        } on Exception {
+          // debugPrint('❌ SPP V2: Encryption failed: $e');
+          // debugPrint('   Falling back to plain payload (INSECURE!)');
           buffer.addAll(payload);
         }
       } else {
-        debugPrint(
-          '⚠️ SPP V2: Encryption requested but no keys provided, using plain payload',
-        );
+        // debugPrint(
+        //   '⚠️ SPP V2: Encryption requested but no keys provided, using plain payload',
+        // );
         buffer.addAll(payload);
       }
     } else {
@@ -724,31 +724,31 @@ class DataPacket extends SppV2Packet {
     // Compare by channel NAME (not value) because auth and protobuf share value=1
     final channelName = channel.name;
 
-    debugPrint(
-      '🔍 getOpcodeForChannel: channel=$channelName (value=${channel.value})',
-    );
+    // debugPrint(
+    //   '🔍 getOpcodeForChannel: channel=$channelName (value=${channel.value})',
+    // );
 
     if (channelName == 'authentication') {
       // Authentication channel: PLAINTEXT (opcode=1)
-      debugPrint('   → AUTH → sendAuth (opcode=1)');
+      // debugPrint('   → AUTH → sendAuth (opcode=1)');
       return DataOpcode.sendAuth;
     } else if (channelName == 'protobuf_command') {
       // ProtobufCommand channel: ENCRYPTED (opcode=2) ✅ FIX
-      debugPrint('   → PROTOBUF → sendProtobuf (opcode=2)');
+      // debugPrint('   → PROTOBUF → sendProtobuf (opcode=2)');
       return DataOpcode.sendProtobuf;
     } else if (channelName == 'activity') {
       // Activity channel: ENCRYPTED (opcode=2)
-      debugPrint('   → ACTIVITY → sendActivity (opcode=2)');
+      // debugPrint('   → ACTIVITY → sendActivity (opcode=2)');
       return DataOpcode.sendActivity;
     } else if (channelName == 'data') {
       // Data channel: PLAINTEXT (opcode=1)
-      debugPrint('   → DATA → sendMassData (opcode=1)');
+      // debugPrint('   → DATA → sendMassData (opcode=1)');
       return DataOpcode.sendMassData;
     } else {
       // Default: ENCRYPTED (opcode=2)
-      debugPrint(
-        '   → UNKNOWN ($channelName) → DEFAULT sendProtobuf (opcode=2)',
-      );
+      // debugPrint(
+      //   '   → UNKNOWN ($channelName) → DEFAULT sendProtobuf (opcode=2)',
+      // );
       return DataOpcode.sendProtobuf;
     }
   }

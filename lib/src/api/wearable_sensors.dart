@@ -953,7 +953,7 @@ class WearableSensors {
   /// **Supported Commands:**
   /// - `DeviceCommandType.clock`: Sync device time. value=DateTime, metadata={'timezone': 'Europe/Madrid'}
   /// - `DeviceCommandType.language`: Set device language. value='en', metadata={'locale': 'en_US'}
-  /// - `DeviceCommandType.vibration`: Send vibration pattern. value=List<Map<String,int>> with {vibrate:0/1, ms:duration}
+  /// - `DeviceCommandType.vibration`: Send vibration pattern. `value=List<Map<String,int>>` with {vibrate:0/1, ms:duration}
   ///
   /// **Throws:**
   /// - [ConnectionException] if device is not connected
@@ -1046,30 +1046,27 @@ class WearableSensors {
   /// - When cancelled: Automatically sends STOP_REALTIME_STATS (type=8, subtype=46) to device
   /// - This is transparent and automatic - no manual enableRealtimeStats() calls needed!
   ///
+  /// **ARCHITECTURE NOTE:**
+  /// - ✅ Uses SINGLE subscribeToRealtimeStats() stream (not multiple parallel subscriptions)
+  /// - ✅ Retorna TODOS los sensores disponibles (HR, movement, calories, steps)
+  /// - ✅ No necesita pasar lista de sensorTypes - automático desde el dispositivo
+  ///
   /// **IMPORTANT:** You must cancel the stream subscription when done to avoid
   /// resource leaks and to send the STOP command to the device.
   ///
   /// **Parameters:**
   /// - [deviceId]: The device ID to stream from
-  /// - [sensorTypes]: List of sensor types to monitor simultaneously
   ///
-  /// **Returns:** Stream of [SensorReading] objects from all sensors.
+  /// **Returns:** Stream of [SensorReading] objects from all available sensors.
   ///
   /// **Throws:**
   /// - [ConnectionException] if device is not connected
-  /// - [WearableException] if no sensors are supported or streaming fails
+  /// - [WearableException] if streaming fails
   ///
   /// **Example:**
   /// ```dart
-  /// final sensors = [
-  ///   SensorType.heartRate,
-  ///   SensorType.accelerometerX,
-  ///   SensorType.steps,
-  ///   SensorType.battery,
-  /// ];
-  ///
   /// // ✅ Automatically sends START command to device
-  /// final subscription = WearableSensors.streamMultiple(deviceId, sensors).listen((reading) {
+  /// final subscription = WearableSensors.streamMultiple(deviceId).listen((reading) {
   ///   print('${reading.sensorType.name}: ${reading.value}');
   /// });
   ///
@@ -1078,16 +1075,8 @@ class WearableSensors {
   /// ```
   static Stream<SensorReading> streamMultiple(
     String deviceId,
-    List<SensorType> sensorTypes,
   ) async* {
     _ensureInitialized();
-
-    if (sensorTypes.isEmpty) {
-      throw const WearableException(
-        'sensorTypes list cannot be empty',
-        code: 'INVALID_PARAMETER',
-      );
-    }
 
     try {
       // 🎯 **AUTO-ACTIVATION**: For Xiaomi devices, send START_REALTIME_STATS before streaming
@@ -1110,69 +1099,28 @@ class WearableSensors {
         );
       }
 
-      // Create controller for merged stream
-      final mergedController = StreamController<SensorReading>();
-      final subscriptions = <StreamSubscription<SensorReading>>[];
+      // ✅ Subscribe to realtime stats and stream ALL available sensors
+      // No filtering needed - return everything the device sends
+      final realtimeStream =
+          _instance!._reader.subscribeToRealtimeStats(deviceId);
 
-      // Subscribe to each sensor type
-      for (final sensorType in sensorTypes) {
-        try {
-          final sampleStream =
-              _instance!._reader.subscribe(deviceId, sensorType);
-
-          // Convert BiometricSample stream to SensorReading stream
-          final readingStream = sampleStream.map(
-            (sample) => SensorReading(
-              deviceId: deviceId,
-              sensorType: sensorType,
-              value: sample.value,
-              timestamp: sample.timestamp,
-              unit: sensorType.unit,
-              quality: null,
-              metadata: sample.metadata,
-            ),
-          );
-
-          // Subscribe and forward to merged stream
-          final subscription = readingStream.listen(
-            (reading) => mergedController.add(reading),
-            onError: (error) {
-              debugPrint('⚠️ Error in ${sensorType.name} stream: $error');
-              // Don't propagate errors from individual sensors
-            },
-          );
-
-          subscriptions.add(subscription);
-
-          // Track this stream for cleanup
-          final streamKey = '$deviceId:${sensorType.name}';
-          _instance!._activeStreams[streamKey] = subscription;
-        } catch (e) {
-          debugPrint('⚠️ Failed to subscribe to ${sensorType.name}: $e');
-          // Continue with other sensors
-        }
-      }
-
-      if (subscriptions.isEmpty) {
-        throw WearableException(
-          'No sensor streams available for device $deviceId',
-          code: 'NO_STREAMS',
+      await for (final sample in realtimeStream) {
+        // Convert BiometricSample to SensorReading and yield directly
+        final reading = SensorReading(
+          deviceId: deviceId,
+          sensorType: sample.sensorType,
+          value: sample.value,
+          timestamp: sample.timestamp,
+          unit: sample.sensorType.unit,
+          quality: null,
+          metadata: sample.metadata,
         );
-      }
 
-      // Yield readings from merged stream
-      await for (final reading in mergedController.stream) {
+        debugPrint(
+          '🎯 [streamMultiple] Yielding: ${sample.sensorType.name} = ${sample.value}',
+        );
         yield reading;
       }
-
-      // Cleanup when stream ends
-      for (final subscription in subscriptions) {
-        await subscription.cancel();
-      }
-      for (final sensorType in sensorTypes) {
-        _instance!._activeStreams.remove('$deviceId:${sensorType.name}');
-      }
-      await mergedController.close();
     } catch (e, stackTrace) {
       throw WearableException(
         'Failed to stream multiple sensors from $deviceId: $e',

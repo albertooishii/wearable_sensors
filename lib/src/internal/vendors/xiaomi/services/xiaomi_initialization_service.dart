@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'dart:io' show Platform;
 
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
@@ -33,7 +34,6 @@ class XiaomiInitializationService {
   // System command subtypes
   static const int _cmdBattery = 1;
   static const int _cmdDeviceStateGet = 78;
-  static const int _cmdClock = 3;
   static const int _cmdLanguage = 6;
 
   XiaomiInitializationService({
@@ -105,11 +105,7 @@ class XiaomiInitializationService {
         await Future.delayed(const Duration(milliseconds: 100));
 
         debugPrint('   🕐 [BG] Syncing time and timezone...');
-        await _sendCommand(
-          _systemCommandType,
-          _cmdClock,
-          'sync clock',
-        );
+        await _syncDeviceTime();
         await Future.delayed(const Duration(milliseconds: 100));
 
         debugPrint('   🌐 [BG] Syncing language and locale...');
@@ -148,7 +144,116 @@ class XiaomiInitializationService {
     }
   }
 
-  /// Generic command sender for post-auth protobuf commands
+  /// Sync device time with current system time (DEFAULT behavior)
+  ///
+  /// **Logic:** Uses system DateTime.now() with auto-detected timezone
+  /// This is the SAME logic as the debug widget's default time sync
+  ///
+  /// **Device Requirements:**
+  /// - Expects Command type=2 (system), subtype=3 (clock)
+  /// - With Clock containing Date, Time, and TimeZone info
+  Future<void> _syncDeviceTime() async {
+    try {
+      debugPrint('🕐 [INIT] Syncing device time with system time...');
+
+      final now = DateTime.now();
+
+      // Create Date structure
+      final date = pb.Date.create()
+        ..year = now.year
+        ..month = now.month
+        ..day = now.day;
+
+      // Create Time structure
+      final time = pb.Time.create()
+        ..hour = now.hour
+        ..minute = now.minute
+        ..second = now.second
+        ..millisecond = now.millisecond;
+
+      // Create TimeZone structure with system timezone
+      final offset =
+          now.timeZoneOffset.inMinutes ~/ 15; // Convert to 15-min blocks
+
+      // Get system timezone name
+      String tzName = _getSystemTimezoneName();
+
+      final timezone = pb.TimeZone.create()
+        ..zoneOffset = offset
+        ..dstOffset = 0 // DST not calculated, can be enhanced
+        ..name = tzName;
+
+      // Create Clock structure
+      final clock = pb.Clock.create()
+        ..date = date
+        ..time = time
+        ..timezone = timezone
+        ..isNot24hour = false; // ✅ Always use 24-hour format
+
+      // Create command with clock data
+      final command = pb.Command()
+        ..type = 2 // System
+        ..subtype = 3 // Clock sync
+        ..system = (pb.System.create()..clock = clock);
+
+      debugPrint(
+        '   📅 Current time: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+      );
+      debugPrint(
+        '   🌍 System Timezone: $tzName (offset: $offset blocks of 15min)',
+      );
+
+      if (sppV2Handler != null) {
+        // BLE auth flow - use handler
+        final payload = command.writeToBuffer();
+        await sppV2Handler!.sendData(
+          deviceId,
+          channel: SppV2Channel.protobufCommand,
+          payload: payload,
+          encrypted: true,
+        );
+        debugPrint(
+          '   ✅ [BLE] Clock sync command sent (${payload.length} bytes)',
+        );
+      } else if (sppService != null) {
+        // Bonded device flow (BT_CLASSIC) - use SppService
+        await sppService!.sendProtobufCommand(command: command);
+        debugPrint('   ✅ [BT_CLASSIC] Clock sync command sent');
+      } else {
+        throw Exception('No transport available for time sync');
+      }
+
+      debugPrint('✅ Device time synchronized successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to sync device time: $e');
+      // Don't rethrow - time sync is not critical for operation
+    }
+  }
+
+  /// Get system timezone name
+  ///
+  /// Detecta automáticamente desde las variables de entorno del sistema.
+  /// Fallback a UTC si no se detecta.
+  String _getSystemTimezoneName() {
+    try {
+      // Intentar obtener la zona horaria del entorno
+      final tzEnv = Platform.environment['TZ'];
+      if (tzEnv != null && tzEnv.isNotEmpty) {
+        debugPrint('   📍 Timezone del sistema: $tzEnv');
+        return tzEnv;
+      }
+
+      // Fallback a UTC
+      debugPrint('   📍 Timezone del sistema: UTC (default)');
+      return 'UTC';
+    } catch (e) {
+      debugPrint('   ⚠️  Error detectando timezone: $e');
+      return 'UTC';
+    }
+  }
+
+  /// Generic command sender for post-auth protobuf commands (GET requests only)
   ///
   /// **Critical:** Device ONLY accepts simple {type, subtype} for GET requests.
   /// Adding empty nested messages causes ACK but NO response.

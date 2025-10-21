@@ -57,27 +57,27 @@ class BtClassicSppTransport implements SppTransport {
 
       _btClassicSubscription = btClassicService.dataStream.listen(
         (final packet) {
-          debugPrint('📥 BT_CLASSIC transport received data:');
-          debugPrint('   Device: ${packet.deviceAddress}');
-          debugPrint('   Data length: ${packet.rawData.length} bytes');
-          debugPrint(
-            '   HEX: ${packet.rawData.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-          );
+          // debugPrint('📥 BT_CLASSIC transport received data:');
+          // debugPrint('   Device: ${packet.deviceAddress}');
+          // debugPrint('   Data length: ${packet.rawData.length} bytes');
+          // debugPrint(
+          //   '   HEX: ${packet.rawData.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+          // );
 
           if (packet.deviceAddress == deviceAddress) {
-            debugPrint('   ✅ Forwarding to SPP service');
+            // debugPrint('   ✅ Forwarding to SPP service');
             _dataController?.add(packet.rawData);
           } else {
-            debugPrint('   ⚠️ Ignoring (wrong device)');
+            // debugPrint('   ⚠️ Ignoring (wrong device)');
           }
         },
         onError: (final error) {
-          debugPrint('❌ BT_CLASSIC transport error: $error');
+          // debugPrint('❌ BT_CLASSIC transport error: $error');
         },
       );
 
       _isInitialized = true;
-      debugPrint('✅ BT_CLASSIC SPP transport initialized');
+      // debugPrint('✅ BT_CLASSIC SPP transport initialized');
     } on Exception catch (e, stackTrace) {
       debugPrint('❌ Failed to initialize BT_CLASSIC transport: $e');
       debugPrint('Stack trace: $stackTrace');
@@ -95,7 +95,7 @@ class BtClassicSppTransport implements SppTransport {
     try {
       final success = await btClassicService.sendData(deviceAddress, data);
       if (success) {
-        debugPrint('📤 BT_CLASSIC: Sent ${data.length} bytes');
+        // debugPrint('📤 BT_CLASSIC: Sent ${data.length} bytes');
       }
       return success;
     } on Exception catch (e) {

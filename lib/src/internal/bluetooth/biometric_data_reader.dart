@@ -298,23 +298,23 @@ class BiometricDataReader {
   /// - ✅ Auto-descubre el service correcto
   /// - ✅ Funciona para cualquier dispositivo Xiaomi conectado
   XiaomiSppService? _getSppServiceForDevice(final String deviceId) {
-    debugPrint('🔍 _getSppServiceForDevice called for $deviceId');
-    debugPrint(
-      '   Active connections: ${_connectionManager.activeConnections.keys.toList()}',
-    );
+    // debugPrint('🔍 _getSppServiceForDevice called for $deviceId');
+    // debugPrint(
+    //   '   Active connections: ${_connectionManager.activeConnections.keys.toList()}',
+    // );
 
     final orchestrator = _connectionManager.activeConnections[deviceId];
-    debugPrint('   Orchestrator type: ${orchestrator?.runtimeType}');
+    // debugPrint('   Orchestrator type: ${orchestrator?.runtimeType}');
 
     if (orchestrator is XiaomiConnectionOrchestrator) {
-      debugPrint('   ✅ Found XiaomiConnectionOrchestrator');
+      // debugPrint('   ✅ Found XiaomiConnectionOrchestrator');
       final spp = orchestrator.sppService;
-      debugPrint('   SPP service: ${spp != null ? "available" : "null"}');
-      debugPrint('   SPP isReady: ${spp?.isReady}');
+      // debugPrint('   SPP service: ${spp != null ? "available" : "null"}');
+      // debugPrint('   SPP isReady: ${spp?.isReady}');
       return spp;
     }
 
-    debugPrint('   ❌ Orchestrator is not XiaomiConnectionOrchestrator');
+    // debugPrint('   ❌ Orchestrator is not XiaomiConnectionOrchestrator');
     return null;
   }
 
@@ -469,9 +469,13 @@ class BiometricDataReader {
         debugPrint('   ✅ START sent successfully');
         debugPrint('   📊 Device should now stream data (subtype=47)');
 
-        // Wait for device to prepare streaming
-        debugPrint('   ⏱️  Waiting 200ms for device to prepare streaming...');
-        await Future.delayed(const Duration(milliseconds: 200));
+        // Wait for device to prepare streaming AND calibrate HR sensor
+        // ⚠️ CRITICAL: Band 10 needs 3-5 seconds to calibrate HR after START command
+        // If we don't wait long enough, we get HR=0 for the first few seconds
+        debugPrint(
+          '   ⏱️  Waiting 4500ms for device to prepare streaming and calibrate HR...',
+        );
+        await Future.delayed(const Duration(milliseconds: 4500));
         debugPrint('   ✅ Device ready for streaming!');
       } else {
         // STOP: Just send the STOP command
@@ -559,29 +563,29 @@ class BiometricDataReader {
     }
 
     try {
-      debugPrint('📊 Subscribing to realtime stats for $deviceId');
-      debugPrint('   🔍 Listening to SPP data stream...');
+      // debugPrint('📊 Subscribing to realtime stats for $deviceId');
+      // debugPrint('   🔍 Listening to SPP data stream...');
 
       // Subscribe to SPP data stream
       await for (final packet in sppService.dataStream) {
-        debugPrint(
-          '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}, channel=${packet.channel}',
-        );
+        // debugPrint(
+        //   '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}, channel=${packet.channel}',
+        // );
 
         if (packet.deviceId != deviceId) {
-          debugPrint('   ⏭️  Skipping packet from different device');
+          // debugPrint('   ⏭️  Skipping packet from different device');
           continue;
         }
 
         // ✅ CRITICAL: Check packet channel to determine how to process
         if (packet.channel == 'activity') {
           // Activity channel: Raw sensor data, often contains realtime stats
-          debugPrint(
-            '   📊 Activity channel detected - attempting to parse sensor data',
-          );
-          debugPrint(
-            '   📋 Payload size: ${packet.data.length} bytes',
-          );
+          // debugPrint(
+          //   '   📊 Activity channel detected - attempting to parse sensor data',
+          // );
+          // debugPrint(
+          //   '   📋 Payload size: ${packet.data.length} bytes',
+          // );
 
           // Try to parse using the xiaomi realtime stats multi-parser.
           // This parser handles:
@@ -603,9 +607,25 @@ class BiometricDataReader {
                   '   ✅ Successfully parsed ${samples.length} samples from activity channel',
                 );
                 for (final sample in samples) {
+                  // Enhanced logging for each sensor with metadata
+                  final metadata = sample.metadata ?? {};
+                  final sensorDisplayName = sample.sensorType.displayName;
+                  final unit = metadata['unit'] ?? 'unknown';
+                  final dataTypeName = metadata['data_type_name'] ?? 'standard';
+
                   debugPrint(
-                    '   📊 Yielding: ${sample.sensorType.displayName} = ${sample.value}',
+                    '   📊 Yielding: $sensorDisplayName = ${sample.value} [$unit] ($dataTypeName)',
                   );
+
+                  // Log additional metadata for investigation sensors
+                  if (sample.sensorType == SensorType.unknown ||
+                      dataTypeName.contains('unknown')) {
+                    final note = metadata['note'] ?? '';
+                    debugPrint(
+                      '      ℹ️  Unknown sensor details: $note',
+                    );
+                  }
+
                   yield sample;
                 }
                 continue; // processed this packet
@@ -679,9 +699,35 @@ class BiometricDataReader {
 
         // Yield cada sensor individualmente
         for (final sample in samples) {
+          // Enhanced logging with full metadata
+          final metadata = sample.metadata ?? {};
+          final sensorDisplayName = sample.sensorType.displayName;
+          final unit = metadata['unit'] ?? 'unknown';
+          final dataTypeName = metadata['data_type_name'] ?? 'standard';
+
           debugPrint(
-            '   📊 Yielding: ${sample.sensorType.displayName} = ${sample.value}',
+            '   📊 Yielding: $sensorDisplayName = ${sample.value} [$unit] (from: $dataTypeName)',
           );
+
+          // Extra logging for movement and unknown sensors
+          if (sensorDisplayName.toLowerCase().contains('movement')) {
+            final movementClassification = sample.value == 0
+                ? 'NONE'
+                : sample.value <= 5
+                    ? 'MINIMAL'
+                    : sample.value <= 15
+                        ? 'MODERATE'
+                        : 'HIGH';
+            debugPrint(
+              '      🎯 Movement Level: $movementClassification (intensity: ${sample.value})',
+            );
+          } else if (sample.sensorType == SensorType.unknown) {
+            final note = metadata['note'] ?? '';
+            debugPrint(
+              '      ❓ Unknown sensor ($dataTypeName): $note',
+            );
+          }
+
           yield sample;
         }
       }
@@ -946,9 +992,9 @@ class BiometricDataReader {
         return null;
       }
 
-      debugPrint(
+      /*debugPrint(
         '   📥 Received response: type=${response.type}, subtype=${response.subtype}',
-      );
+      );*/
 
       // Parse con ParserRegistry
       final parser = ParserRegistry.getParser(parserName);
@@ -1010,8 +1056,54 @@ class BiometricDataReader {
       }
     }
 
-    // ❌ Fallback: Load desde JSON (auto-detect device type)
-    final deviceImpl = await DeviceImplementationLoader.loadOrGeneric(deviceId);
+    // ⚠️ Orchestrator not yet in activeConnections (still initializing)
+    // Try to find it by looking up the actual connected device name
+    debugPrint(
+      '   ⚠️  Orchestrator not in activeConnections, trying device lookup...',
+    );
+
+    // Get the actual device name from DeviceConnectionManager's device states
+    final deviceStates = _connectionManager.deviceStates;
+    final device = deviceStates[deviceId];
+
+    if (device != null) {
+      final deviceName = device.name ?? '';
+      debugPrint(
+        '   ✅ Found device name from cache: $deviceName',
+      );
+
+      // Try to detect implementation from device name
+      // For Xiaomi, we can detect Band 10, Band 9, Band 8, etc. from the name
+      if (deviceName.contains('Smart Band 10') ||
+          deviceName.contains('Band 10')) {
+        debugPrint('   🔍 Detected Xiaomi Smart Band 10 from device name');
+        try {
+          final deviceImpl =
+              await DeviceImplementationLoader.load('xiaomi_smart_band_10');
+          _deviceImplCache[deviceId] = deviceImpl;
+          return deviceImpl;
+        } on Exception catch (e) {
+          debugPrint('   ⚠️  Failed to load xiaomi_smart_band_10: $e');
+        }
+      } else if (deviceName.contains('Smart Band 9') ||
+          deviceName.contains('Band 9')) {
+        debugPrint('   🔍 Detected Xiaomi Smart Band 9 from device name');
+        try {
+          final deviceImpl =
+              await DeviceImplementationLoader.load('xiaomi_smart_band_9');
+          _deviceImplCache[deviceId] = deviceImpl;
+          return deviceImpl;
+        } on Exception catch (e) {
+          debugPrint('   ⚠️  Failed to load xiaomi_smart_band_9: $e');
+        }
+      }
+    }
+
+    // ❌ Last resort Fallback: Load generic (without trying deviceId as JSON file name)
+    debugPrint(
+      '   ℹ️ Using generic.json as fallback for $deviceId',
+    );
+    final deviceImpl = await DeviceImplementationLoader.loadGeneric();
     _deviceImplCache[deviceId] = deviceImpl;
 
     debugPrint('   📱 Device type: ${deviceImpl.deviceType}');

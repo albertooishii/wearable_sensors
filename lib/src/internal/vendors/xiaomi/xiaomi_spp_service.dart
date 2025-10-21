@@ -366,7 +366,7 @@ class XiaomiSppService {
       // Encode Command to protobuf bytes
       final commandBytes = command.writeToBuffer();
 
-      debugPrint('═══════════════════════════════════════════════════');
+      /*debugPrint('═══════════════════════════════════════════════════');
       debugPrint('📤 SPP: Sending protobuf command');
       debugPrint('   Request ID: $requestId');
       debugPrint('   Command type: ${command.type}');
@@ -375,7 +375,7 @@ class XiaomiSppService {
       debugPrint(
         '   Payload hex: ${commandBytes.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
       );
-      debugPrint('═══════════════════════════════════════════════════');
+      debugPrint('═══════════════════════════════════════════════════');*/
 
       // For BT_CLASSIC with SPP V2, encode as DATA packet and send via transport
       if (transport is BtClassicSppTransport &&
@@ -412,13 +412,13 @@ class XiaomiSppService {
 
         final packetBytes = dataPacket.encode(encryptionKeys: encryptionKeys);
 
-        debugPrint(
+        /*debugPrint(
           '   📦 Encoded as SPP V2 DATA packet: ${packetBytes.length} bytes',
         );
         debugPrint('   Sequence: $sequenceNumber → RequestID: $requestId');
         debugPrint(
           '   Packet hex: ${packetBytes.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-        );
+        );*/
 
         // Send via transport
         await transport.sendData(packetBytes);
@@ -456,7 +456,7 @@ class XiaomiSppService {
         },
       );
 
-      debugPrint('✅ SPP: Received response for requestId=$requestId');
+      // debugPrint('✅ SPP: Received response for requestId=$requestId');
       return response;
     } on TimeoutException {
       debugPrint('❌ SPP: Protobuf command timed out');
@@ -495,14 +495,14 @@ class XiaomiSppService {
       // Encode Command to protobuf bytes
       final commandBytes = command.writeToBuffer();
 
-      debugPrint('═══════════════════════════════════════════════════');
+      /*debugPrint('═══════════════════════════════════════════════════');
       debugPrint('📤 SPP: Sending AUTHENTICATION command');
       debugPrint('   Request ID: $requestId');
       debugPrint('   Command type: ${command.type}');
       debugPrint('   Command subtype: ${command.subtype}');
       debugPrint('   Payload size: ${commandBytes.length} bytes');
       debugPrint('   🔓 Channel: AUTHENTICATION (not protobuf_command)');
-      debugPrint('═══════════════════════════════════════════════════');
+      debugPrint('═══════════════════════════════════════════════════');*/
 
       // For BT_CLASSIC with SPP V2, encode as DATA packet with authentication channel
       if (transport is BtClassicSppTransport &&
@@ -523,13 +523,13 @@ class XiaomiSppService {
 
         final packetBytes = dataPacket.encode(encryptionKeys: encryptionKeys);
 
-        debugPrint(
+        /*debugPrint(
           '   📦 Encoded as SPP V2 DATA packet: ${packetBytes.length} bytes',
         );
         debugPrint('   Sequence: $sequenceNumber → RequestID: $requestId');
         debugPrint(
           '   Packet hex: ${packetBytes.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-        );
+        );*/
 
         // Send via transport
         await transport.sendData(packetBytes);
@@ -556,7 +556,7 @@ class XiaomiSppService {
         },
       );
 
-      debugPrint('✅ SPP: Received auth response for requestId=$requestId');
+      //debugPrint('✅ SPP: Received auth response for requestId=$requestId');
       return response;
     } on TimeoutException {
       debugPrint('❌ SPP: Authentication command timed out');
@@ -798,10 +798,10 @@ class XiaomiSppService {
   }
 
   void _handleIncomingData(final Uint8List data) {
-    debugPrint('📥 SPP: Received ${data.length} bytes');
-    debugPrint(
-      '   Raw hex: ${data.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-    );
+    // debugPrint('📥 SPP: Received ${data.length} bytes');
+    // debugPrint(
+    //   '   Raw hex: ${data.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+    // );
 
     // ✅ GADGETBRIDGE PATTERN: Acumular bytes en buffer
     // Socket puede enviar datos fragmentados, necesitamos buffer acumulativo
@@ -813,12 +813,13 @@ class XiaomiSppService {
     final bufferSizeAfter = _buffer.length;
     // Only log if buffer still has data (incomplete packet scenario)
     if (bufferSizeAfter > 0) {
-      debugPrint(
-          '   ⚠️ Buffer has $bufferSizeAfter bytes remaining (incomplete packet)');
-      final remaining = _buffer.toBytes();
-      debugPrint(
-        '      Hex: ${remaining.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-      );
+      // debugPrint(
+      //   '   ⚠️ Buffer has $bufferSizeAfter bytes remaining (incomplete packet)',
+      // );
+      // final remaining = _buffer.toBytes();
+      // debugPrint(
+      //   '      Hex: ${remaining.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+      // );
     }
   }
 
@@ -840,13 +841,13 @@ class XiaomiSppService {
         break; // Nothing to process
       }
 
-      debugPrint(
-        '🔍 SPP: Processing iteration #$loopIteration (${bufferBytes.length} bytes)',
-      );
+      // debugPrint(
+      //   '🔍 SPP: Processing iteration #$loopIteration (${bufferBytes.length} bytes)',
+      // );
       if (loopIteration > 10) {
-        debugPrint(
-          '⚠️ SPP: Too many iterations (suspected infinite loop), breaking',
-        );
+        // debugPrint(
+        //   '⚠️ SPP: Too many iterations (suspected infinite loop), breaking',
+        // );
         break;
       }
 
@@ -854,9 +855,9 @@ class XiaomiSppService {
       // Version uses V1 protocol even for V2 devices
       final v1Packet = XiaomiSppPacketV1.decode(bufferBytes);
       if (v1Packet != null && v1Packet.channel == XiaomiSppChannel.version) {
-        debugPrint('📦 SPP V1: Received Version handshake response');
-        debugPrint('   OpCode: 0x${v1Packet.opCode.toRadixString(16)}');
-        debugPrint('   FrameSerial: ${v1Packet.frameSerial}');
+        // debugPrint('📦 SPP V1: Received Version handshake response');
+        // debugPrint('   OpCode: 0x${v1Packet.opCode.toRadixString(16)}');
+        // debugPrint('   FrameSerial: ${v1Packet.frameSerial}');
 
         // Complete the FIRST pending Version request
         if (_pendingVersionRequests.isNotEmpty) {
@@ -864,9 +865,9 @@ class XiaomiSppService {
           final completer = _pendingVersionRequests.remove(requestId);
 
           if (completer != null && !completer.isCompleted) {
-            debugPrint(
-              '✅ Accepting Version response (device frameSerial=${v1Packet.frameSerial})',
-            );
+            // debugPrint(
+            //   '✅ Accepting Version response (device frameSerial=${v1Packet.frameSerial})',
+            // );
             completer.complete(true);
           }
         }
@@ -886,7 +887,7 @@ class XiaomiSppService {
         final parseResult = _processSppV2Packet(bufferBytes);
 
         if (parseResult == _ParseResult.incomplete) {
-          debugPrint('   ⏸️ Packet incomplete, waiting for more bytes');
+          // debugPrint('   ⏸️ Packet incomplete, waiting for more bytes');
           break; // Wait for more data
         } else if (parseResult == _ParseResult.invalid) {
           debugPrint('   ❌ Invalid packet, skipping bytes');
@@ -967,7 +968,7 @@ class XiaomiSppService {
       }
 
       // Packet decoded successfully
-      debugPrint('📦 SPP V2: Decoded ${packet.packetType}');
+      // debugPrint('📦 SPP V2: Decoded ${packet.packetType}');
 
       // Handle SESSION_CONFIG packets (FIRST - per Gadgetbridge flow)
       if (packet is SessionConfigPacket) {
@@ -1039,21 +1040,21 @@ class XiaomiSppService {
       if (packet is DataPacket) {
         final sequenceNumber = packet.sequenceNumber;
         final channel = packet.channel;
-        final isEncrypted = packet.encrypted;
+        // final isEncrypted = packet.encrypted;
 
-        debugPrint(
-          '📦 SPP V2: DATA packet seq=$sequenceNumber, channel=$channel, encrypted=$isEncrypted',
-        );
+        // debugPrint(
+        //   '📦 SPP V2: DATA packet seq=$sequenceNumber, channel=$channel, encrypted=$isEncrypted',
+        // );
 
         // Decrypt payload if encrypted
         final payload = packet.getDecryptedPayload(
           encryptionKeys: encryptionKeys,
         );
 
-        debugPrint('   Payload: ${payload.length} bytes');
-        debugPrint(
-          '   Payload hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-        );
+        // debugPrint('   Payload: ${payload.length} bytes');
+        // debugPrint(
+        //   '   Payload hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+        // );
 
         // Only attempt to parse protobuf Command when the channel is
         // protobuf_command. Activity/data channels carry different payload
@@ -1063,18 +1064,18 @@ class XiaomiSppService {
           try {
             final command = proto.Command.fromBuffer(payload);
 
-            debugPrint(
-              '   ✅ Parsed Command: type=${command.type}, subtype=${command.subtype}',
-            );
+            // debugPrint(
+            //   '   ✅ Parsed Command: type=${command.type}, subtype=${command.subtype}',
+            // );
 
             // Check if this is a realtime stats event (unsolicited)
             final isRealtimeStatsEvent =
                 command.type == 8 && command.subtype == 47;
 
             if (isRealtimeStatsEvent) {
-              debugPrint(
-                '   🎯 REALTIME STATS EVENT DETECTED! (type=8, subtype=47)',
-              );
+              // debugPrint(
+              //   '   🎯 REALTIME STATS EVENT DETECTED! (type=8, subtype=47)',
+              // );
             }
 
             // ✅ FIX: Match response to request by sequence number (not FIFO)
@@ -1091,21 +1092,21 @@ class XiaomiSppService {
 
                 if (completer != null && !completer.isCompleted) {
                   completer.complete(command);
-                  debugPrint(
-                    '✅ SPP: Completed requestId=$requestId (matched by seq=$sequenceNumber)',
-                  );
+                  // debugPrint(
+                  //   '✅ SPP: Completed requestId=$requestId (matched by seq=$sequenceNumber)',
+                  // );
                 }
               } else {
                 // ⚠️ FALLBACK: Device responded with different seq than expected
                 // This can happen with buggy devices that don't echo the exact seq
                 // Try intelligent fallback: match by command type+subtype signature
-                debugPrint(
-                  '⚠️ SPP: No exact seq match for seq=$sequenceNumber, trying intelligent fallback',
-                );
+                // debugPrint(
+                //   '⚠️ SPP: No exact seq match for seq=$sequenceNumber, trying intelligent fallback',
+                // );
 
                 // Build signature of received command
                 final responseSignature = '${command.type}:${command.subtype}';
-                debugPrint('   📋 Response signature: $responseSignature');
+                // debugPrint('   📋 Response signature: $responseSignature');
 
                 // Search pending requests for matching expected command
                 int? matchingRequestId;
@@ -1113,9 +1114,9 @@ class XiaomiSppService {
                   if (entry.value == responseSignature &&
                       _pendingRequests.containsKey(entry.key)) {
                     matchingRequestId = entry.key;
-                    debugPrint(
-                      '   ✅ Found matching pending request: requestId=$matchingRequestId expects $responseSignature',
-                    );
+                    // debugPrint(
+                    //   '   ✅ Found matching pending request: requestId=$matchingRequestId expects $responseSignature',
+                    // );
                     break;
                   }
                 }
@@ -1128,22 +1129,22 @@ class XiaomiSppService {
                   _requestIdToExpectedCommand.remove(matchingRequestId);
                   _sequenceToRequestId.remove(sequenceNumber);
 
-                  debugPrint(
-                    '   → Using signature match: seq=$sequenceNumber → requestId=$matchingRequestId',
-                  );
+                  // debugPrint(
+                  //   '   → Using signature match: seq=$sequenceNumber → requestId=$matchingRequestId',
+                  // );
 
                   if (matchingCompleter != null &&
                       !matchingCompleter.isCompleted) {
                     matchingCompleter.complete(command);
-                    debugPrint(
-                      '✅ SPP: Completed requestId=$matchingRequestId (matched by command signature)',
-                    );
+                    // debugPrint(
+                    //   '✅ SPP: Completed requestId=$matchingRequestId (matched by command signature)',
+                    // );
                   }
                 } else {
                   // No match found - last resort FIFO fallback
-                  debugPrint(
-                    '   ⚠️  No signature match found, trying FIFO as last resort',
-                  );
+                  // debugPrint(
+                  //   '   ⚠️  No signature match found, trying FIFO as last resort',
+                  // );
 
                   if (_pendingRequests.isNotEmpty) {
                     final fallbackRequestId = _pendingRequests.keys.first;
@@ -1153,9 +1154,9 @@ class XiaomiSppService {
                     _requestIdToExpectedCommand.remove(fallbackRequestId);
                     _sequenceToRequestId.remove(sequenceNumber);
 
-                    debugPrint(
-                      '   → Using FIFO fallback: matched seq=$sequenceNumber to requestId=$fallbackRequestId',
-                    );
+                    // debugPrint(
+                    //   '   → Using FIFO fallback: matched seq=$sequenceNumber to requestId=$fallbackRequestId',
+                    // );
 
                     if (fallbackCompleter != null &&
                         !fallbackCompleter.isCompleted) {
@@ -1263,10 +1264,10 @@ class XiaomiSppService {
       final ackPacket = AckPacket(sequenceNumber: sequenceNumber);
       final ackBytes = ackPacket.encode();
 
-      debugPrint('📤 SPP V2: Sending ACK for seq $sequenceNumber');
+      // debugPrint('📤 SPP V2: Sending ACK for seq $sequenceNumber');
       transport.sendData(ackBytes);
-    } on Exception catch (e) {
-      debugPrint('❌ SPP V2: Failed to send ACK: $e');
+    } catch (_) {
+      // debugPrint('❌ SPP V2: Failed to send ACK');
     }
   }
 

@@ -162,9 +162,11 @@ class BluetoothClassicService {
       // Without delay: ~40% first-attempt failure rate ("socket timeout" / "read ret: -1")
       // With 500ms:   ~100% first-attempt success rate (tested on Xiaomi Mi Band 10)
       debugPrint('   🌤️ Pre-warming BT_CLASSIC socket (500ms)...');
-      await Future.delayed(const Duration(
-          milliseconds:
-              500)); // Connect using standard SPP UUID (flutter_blue_classic uses it by default)
+      await Future.delayed(
+        const Duration(
+          milliseconds: 500,
+        ),
+      ); // Connect using standard SPP UUID (flutter_blue_classic uses it by default)
       final connection = await _bluetoothAdapter.connect(deviceAddress).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw TimeoutException('Connection timeout'),
@@ -275,7 +277,7 @@ class BluetoothClassicService {
       // Wait for data to be sent
       await connection.output.allSent;
 
-      debugPrint('📤 Sent ${data.length} bytes to $deviceAddress');
+      // debugPrint('📤 Sent ${data.length} bytes to $deviceAddress');
       return true;
     } on Exception catch (e) {
       debugPrint('❌ Failed to send data to $deviceAddress: $e');
@@ -333,7 +335,7 @@ class BluetoothClassicService {
     );
 
     _dataController.add(packet);
-    debugPrint('📥 Received ${data.length} bytes from $deviceAddress');
+    // debugPrint('📥 Received ${data.length} bytes from $deviceAddress');
   }
 
   void _handleRemoteDisconnect(final String deviceAddress) {

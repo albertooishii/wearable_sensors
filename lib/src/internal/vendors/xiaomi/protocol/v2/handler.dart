@@ -307,7 +307,7 @@ class SppV2ProtocolHandler {
   /// }
   /// ```
   void _handlePacket(final String deviceId, final SppV2Packet packet) {
-    debugPrint('📦 SPP V2: Handling packet: $packet');
+    //debugPrint('📦 SPP V2: Handling packet: $packet');
 
     // Handle packet based on type (using equality since PacketType is now a class)
     if (packet.packetType == PacketType.sessionConfig) {
@@ -372,25 +372,25 @@ class SppV2ProtocolHandler {
   void _handleDataPacket(final String deviceId, final DataPacket packet) {
     debugPrint('═══════════════════════════════════════════════════');
     debugPrint('📊 SPP V2: DATA PACKET RECEIVED');
-    debugPrint('   Sequence: ${packet.sequenceNumber}');
-    debugPrint('   Channel: ${packet.channel.name} (${packet.channel.value})');
-    debugPrint('   Opcode: ${packet.opcode.name} (${packet.opcode.value})');
-    debugPrint('   Encrypted: ${packet.encrypted}');
-    debugPrint('   Payload: ${packet.payload.length} bytes');
-    debugPrint(
-      '   Payload hex: ${packet.payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-    );
-    debugPrint('═══════════════════════════════════════════════════');
+    // debugPrint('   Sequence: ${packet.sequenceNumber}');
+    // debugPrint('   Channel: ${packet.channel.name} (${packet.channel.value})');
+    // debugPrint('   Opcode: ${packet.opcode.name} (${packet.opcode.value})');
+    // debugPrint('   Encrypted: ${packet.encrypted}');
+    // debugPrint('   Payload: ${packet.payload.length} bytes');
+    // debugPrint(
+    //   '   Payload hex: ${packet.payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+    // );
+    // debugPrint('═══════════════════════════════════════════════════');
 
     // Send ACK immediately (Gadgetbridge does this)
     _sendAck(deviceId, packet.sequenceNumber);
 
     // Get decrypted payload
     final payload = packet.getDecryptedPayload();
-    debugPrint('   Decrypted payload: ${payload.length} bytes');
-    debugPrint(
-      '   Decrypted hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
-    );
+    // debugPrint('   Decrypted payload: ${payload.length} bytes');
+    // debugPrint(
+    //   '   Decrypted hex: ${payload.map((final b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}',
+    // );
 
     // Route to appropriate handler based on channel (using equality since SppV2Channel is now a class)
     // ✅ SMART ROUTING: Parse Command protobuf to detect type and route correctly
@@ -404,36 +404,36 @@ class SppV2ProtocolHandler {
         final command = pb.Command.fromBuffer(payload);
         final commandType = command.type;
 
-        debugPrint(
-          '🔐 SPP V2: Received protobuf Command (channel=${packet.channel.name}, type=$commandType)',
-        );
+        // debugPrint(
+        //   '🔐 SPP V2: Received protobuf Command (channel=${packet.channel.name}, type=$commandType)',
+        // );
 
         // Route based on command type
         if (commandType == 1) {
           // Type 1 = Authentication commands (phoneNonce, watchNonce, auth)
-          debugPrint('   → Routing to AUTH handler');
+          // debugPrint('   → Routing to AUTH handler');
           onAuthDataReceived?.call(payload);
         } else if (commandType == 2) {
           // Type 2 = System commands (battery, device info, clock, etc.)
-          debugPrint('   → Routing to SYSTEM handler');
+          // debugPrint('   → Routing to SYSTEM handler');
           onSystemCommandReceived?.call(payload);
         } else {
           // Other command types
-          debugPrint('   → Routing to PROTOBUF handler (type=$commandType)');
+          // debugPrint('   → Routing to PROTOBUF handler (type=$commandType)');
           onProtobufReceived?.call(payload);
         }
-      } on Exception catch (e) {
+      } catch (_) {
         // If not a valid Command protobuf, route to auth handler (legacy behavior)
-        debugPrint('⚠️  SPP V2: Could not parse as Command protobuf: $e');
-        debugPrint('   → Falling back to AUTH handler');
+        // debugPrint('⚠️  SPP V2: Could not parse as Command protobuf');
+        // debugPrint('   → Falling back to AUTH handler');
         onAuthDataReceived?.call(payload);
       }
     } else if (packet.channel == SppV2Channel.activity) {
-      debugPrint('🏃 SPP V2: Activity data received (not yet handled)');
+      // debugPrint('🏃 SPP V2: Activity data received (not yet handled)');
     } else if (packet.channel == SppV2Channel.data) {
-      debugPrint('💾 SPP V2: Mass data received (not yet handled)');
+      // debugPrint('💾 SPP V2: Mass data received (not yet handled)');
     } else {
-      debugPrint('⚠️  SPP V2: Unknown channel: ${packet.channel}');
+      // debugPrint('⚠️  SPP V2: Unknown channel: ${packet.channel}');
     }
   }
 
@@ -445,7 +445,7 @@ class SppV2ProtocolHandler {
     final ack = AckPacket(sequenceNumber: sequenceNumber);
     final encoded = ack.encode();
 
-    debugPrint('📨 SPP V2: Sending ACK for seq $sequenceNumber');
+    // debugPrint('📨 SPP V2: Sending ACK for seq $sequenceNumber');
 
     await _bleService.writeCharacteristic(
       deviceId: deviceId,
@@ -498,7 +498,7 @@ class SppV2ProtocolHandler {
     final encoded = packet.encode(encryptionKeys: keysToPass);
 
     // 🔴 TEST #15: LOGGING ULTRA DETALLADO DE ENVÍO
-    debugPrint('═══════════════════════════════════════════════════');
+    /*debugPrint('═══════════════════════════════════════════════════');
     debugPrint('📤📤📤 SPP V2: SENDING DATA PACKET');
     debugPrint('   Device: $deviceId');
     debugPrint('   Sequence Number: $currentSeq');
@@ -521,7 +521,7 @@ class SppV2ProtocolHandler {
     debugPrint('📤 SPP V2: Sending DATA packet (seq=$currentSeq)');
     debugPrint('   Channel: $channel');
     debugPrint('   Payload: ${payload.length} bytes');
-    debugPrint('   Encrypted: $encrypted');
+    debugPrint('   Encrypted: $encrypted');*/
 
     await _bleService.writeCharacteristic(
       deviceId: deviceId,

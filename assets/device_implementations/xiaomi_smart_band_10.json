@@ -2,6 +2,13 @@
     "version": "2.1",
     "device_type": "xiaomi_smart_band_10",
     "display_name": "Xiaomi Smart Band 10 (SPP Auto-detect V2)",
+    "capabilities": {
+        "heart_rate": true,
+        "hrv": true,
+        "accelerometer": false,
+        "rem_detection_mode": "hr_hrv_only",
+        "expected_rem_accuracy": "70-80%"
+    },
     "service_filter": [
         "0000FE95-0000-1000-8000-00805F9B34FB"
     ],
