@@ -195,6 +195,13 @@ class _RealtimeStatsTracker {
       previousCalories = currentCalories;
       previousUnknown3 = currentUnknown3;
       previousMovementState = 1; // Start as awake (default assumption)
+      // 🚀 CRITICAL: Force movement state machine to CONFIRMING_AWAKE at startup
+      // This ensures first HRV reading sees movement=1, not 0
+      _sleepState = _SleepStateEnum.confirmingAwake;
+      _stateTransitionCounter = 0;
+      debugPrint(
+        '   🔄 STATE MACHINE INITIALIZED: CONFIRMING_AWAKE (user assumed awake at startup)',
+      );
       return 1;
     }
 
@@ -268,7 +275,10 @@ class _RealtimeStatsTracker {
     if (_sleepState == _SleepStateEnum.awake) {
       result = 1; // User is confirmed awake
     } else if (_sleepState == _SleepStateEnum.confirmingAwake) {
-      result = smoothed; // Still confirming, use smoothed value
+      // 🚀 CRITICAL: During confirmation phase, assume awake (=1)
+      // Don't use smoothed value - we want to be aggressively awake until proven sleeping
+      // This ensures first readings show movement=1, allowing proper HRV interpretation
+      result = 1;
     } else {
       // CONFIRMING_SLEEP or SLEEP_CONFIRMED
       result = 0; // User is sleeping (or transitioning to sleep)
