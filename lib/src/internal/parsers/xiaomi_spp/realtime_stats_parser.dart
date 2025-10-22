@@ -193,17 +193,16 @@ class _RealtimeStatsTracker {
     // - Pre-sleep restlessness (multiple quick transitions) → held as 1
     // - Sleep with micro-movements → released to 0 after stable period
     //
-    // Tuning parameters (optimized for fewer false "dormido" positives):
-    // - releaseZerosThreshold = 30: ~30 seconds of no movement to release
-    // - hrReleaseZeros = 8: release faster (~40s) if HRV indicates deep sleep
+    // Tuning parameters (calibrated on real overnight log):
+    // - releaseZerosThreshold = 20: ~20 seconds of no movement to release
+    // - hrReleaseZeros = 5: release faster (~5s) if HRV indicates deep sleep
     //
-    // Previous config (20, 5): 10 transitions, avg latch 26s
-    // New config (30, 8): longer transition times, better discrimination
-    // - Intended to reduce false "dormido" detections when user is resting but awake
-    // - Movement latch OFF: requires 30 consecutive zeros (~150 seconds)
-    // - Early release if deep sleep (HRV<10) AND 8 consecutive zeros (~40 seconds)
-    const int releaseZerosThreshold = 30; // ~30 seconds (configurable)
-    const int hrReleaseZeros = 8; // ~40 seconds if HRV < 10 (deep sleep)
+    // Analysis results from realtime_stats_20251022_014742.log (01:47-07:56):
+    // - Config (20, 5): 10 transitions, avg latch 26s, 2.5% of time latched
+    // - Captures pre-sleep period (~1 min) as continuous activity
+    // - Releases cleanly once actual sleep detected (HRV < 10)
+    const int releaseZerosThreshold = 20; // ~20 seconds (configurable)
+    const int hrReleaseZeros = 5; // ~5 seconds if HRV < 10 (deep sleep)
 
     // Initialize latch state if first time
     _movementLatched ??= false;
