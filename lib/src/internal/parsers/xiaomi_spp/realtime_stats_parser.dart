@@ -8,6 +8,64 @@ import '../../models/biometric_sample.dart';
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
 
+/// 🎯 Movement Filter: Smooths binary movement detection using mode window
+///
+/// Problem: Raw movement detection produces false positives during transitions
+/// (e.g., 0→1→0 within 1-5 seconds during sleep onset/offset)
+///
+/// Solution: Apply a sliding mode window to the binary movement stream
+/// - Window size 20: Requires sustained movement for ~20 readings (~100 seconds)
+/// - Only flips to 1 if majority of recent readings show movement
+class _MovementFilter {
+  final int windowSize;
+  final List<int> _buffer = [];
+
+  _MovementFilter({this.windowSize = 20})
+      : assert(windowSize > 0, 'Window size must be positive');
+
+  /// Add a new movement reading and return smoothed value
+  /// Returns: 1 if majority of window shows movement, 0 otherwise
+  int apply(int movementBinary) {
+    assert(
+      movementBinary == 0 || movementBinary == 1,
+      'Movement must be binary (0 or 1)',
+    );
+
+    _buffer.add(movementBinary);
+
+    // Keep buffer at max size
+    if (_buffer.length > windowSize) {
+      _buffer.removeAt(0);
+    }
+
+    // Need at least half the window filled before filtering
+    if (_buffer.length < windowSize) {
+      // Before window is full, return the current value
+      return movementBinary;
+    }
+
+    // Calculate mode (most common value)
+    int count0 = 0;
+    int count1 = 0;
+
+    for (final val in _buffer) {
+      if (val == 0) {
+        count0++;
+      } else {
+        count1++;
+      }
+    }
+
+    // Return 1 if majority are 1s, otherwise 0
+    return count1 > count0 ? 1 : 0;
+  }
+
+  /// Reset filter
+  void reset() {
+    _buffer.clear();
+  }
+}
+
 /// Parser for Xiaomi SPP Realtime Stats (multi-sensor data)
 ///
 /// Handles periodic realtime statistics from Xiaomi Band 9/10:
@@ -59,6 +117,10 @@ class _RealtimeStatsTracker {
   final List<int> _hrHistory = [];
   static const int _maxHrHistorySize = 120; // ~2 minutes at 1Hz
 
+  // 🎯 NEW: Movement filter for smoothing binary detection
+  // Window of 20 readings (~100 seconds) to eliminate false positives
+  final _MovementFilter _movementFilter = _MovementFilter(windowSize: 20);
+
   bool isUnknown3Updated(int current) {
     final updated = previousUnknown3 != current;
     previousUnknown3 = current;
@@ -89,6 +151,7 @@ class _RealtimeStatsTracker {
   /// Detect if movement has changed (binary detector)
   /// Movement = 1 if ANY of (steps, calories, unknown3) changed
   /// Movement = 0 if NONE changed
+  /// 🎯 Applies smoothing filter (mode window of 20) to eliminate false positives
   int detectMovementChange({
     required int currentSteps,
     required int currentCalories,
@@ -103,17 +166,20 @@ class _RealtimeStatsTracker {
       return 0;
     }
 
-    // ✅ Subsequent calls: detect if any value changed
-    final currentMovement = (currentSteps != previousSteps ||
+    // ✅ Subsequent calls: detect if any value changed (raw binary)
+    final rawMovement = (currentSteps != previousSteps ||
             currentCalories != previousCalories ||
             currentUnknown3 != previousUnknown3)
         ? 1
         : 0;
 
-    final changed = previousMovementState != null &&
-        previousMovementState != currentMovement;
+    // 🎯 Apply smoothing filter (mode window of 20 readings ~100 seconds)
+    final smoothedMovement = _movementFilter.apply(rawMovement);
 
-    previousMovementState = currentMovement;
+    final changed = previousMovementState != null &&
+        previousMovementState != smoothedMovement;
+
+    previousMovementState = smoothedMovement;
 
     // ✅ UPDATE: Save current values for next comparison
     previousSteps = currentSteps;
@@ -121,13 +187,13 @@ class _RealtimeStatsTracker {
     previousUnknown3 = currentUnknown3;
 
     if (changed) {
-      final changeLabel = currentMovement == 1 ? 'START' : 'STOP';
+      final changeLabel = smoothedMovement == 1 ? 'START' : 'STOP';
       debugPrint(
-        '   📊 MOVEMENT DETECTOR: $changeLabel MOVEMENT (binary: $currentMovement)',
+        '   📊 MOVEMENT DETECTOR: $changeLabel MOVEMENT (raw: $rawMovement, smoothed: $smoothedMovement)',
       );
     }
 
-    return currentMovement;
+    return smoothedMovement;
   }
 
   /// ✨ NEW: Calculate HRV from HR history (Heart Rate Variability)
