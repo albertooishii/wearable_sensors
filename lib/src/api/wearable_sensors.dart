@@ -707,6 +707,16 @@ class WearableSensors {
   ///
   /// **Returns:** Current [ConnectionState].
   ///
+  /// Get the current connection state of a device
+  ///
+  /// Returns the active connection state from the device's orchestrator:
+  /// - For Xiaomi devices: Returns BT_CLASSIC state (after auth, BLE is closed)
+  /// - For other devices: Returns the primary connection state
+  ///
+  /// **Important:** This returns the active transport layer state, not multiple channels.
+  /// Xiaomi uses BLE for initial authentication, then switches to BT_CLASSIC for streaming.
+  /// This method returns the BT_CLASSIC state (the active transport).
+  ///
   /// **Example:**
   /// ```dart
   /// final state = await WearableSensors.connectionStatus(deviceId);
