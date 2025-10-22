@@ -8,6 +8,23 @@ import '../../models/biometric_sample.dart';
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
 
+/// 🔄 Sleep State Machine: Manages transition from Awake → Sleeping
+///
+/// States:
+/// - CONFIRMING_AWAKE: Waiting for 2.5 min of movement to confirm user is awake
+/// - AWAKE: User confirmed awake (has movement or activity)
+/// - CONFIRMING_SLEEP: Waiting for 10 min without movement to confirm sleep
+/// - SLEEP_CONFIRMED: User confirmed sleeping (10 min without movement)
+///
+/// Once SLEEP_CONFIRMED, movement does NOT force back to AWAKE.
+/// Phases (Deep/Light/REM) determined by HRV only once sleeping.
+enum _SleepStateEnum {
+  confirmingAwake,
+  awake,
+  confirmingSleep,
+  sleepConfirmed,
+}
+
 /// 🎯 Movement Filter: Smooths binary movement detection using mode window
 ///
 /// Problem: Raw movement detection produces false positives during transitions
@@ -147,15 +164,24 @@ class _RealtimeStatsTracker {
 
   // ✨ NEW: Track movement as binary (0 = no movement, 1 = movement detected)
   int? previousMovementState;
-  // 🔒 Movement latch state: once movement detected, remain latched until
-  // N consecutive zeros are observed
-  bool? _movementLatched;
-  int? _consecutiveZeros;
+
+  // 🔄 NEW: Sleep State Machine for Awake/Sleeping confirmation
+  _SleepStateEnum _sleepState = _SleepStateEnum.confirmingAwake;
+  int _stateTransitionCounter =
+      0; // Counts consecutive zeros/movements in current state
+
+  // Thresholds for state transitions:
+  static const int _confirmAwakeThreshold = 150; // 2.5 min at 1Hz
+  static const int _confirmSleepThreshold = 600; // 10 min at 1Hz
 
   /// Detect if movement has changed (binary detector)
   /// Movement = 1 if ANY of (steps, calories, unknown3) changed
   /// Movement = 0 if NONE changed
-  /// 🎯 Applies smoothing filter (mode window of 20) to eliminate false positives
+  /// 🎯 Uses state machine to confirm Awake/Sleeping transitions:
+  /// - CONFIRMING_AWAKE: Needs 2.5 min of movement to confirm awake
+  /// - AWAKE: User is awake (movement detected)
+  /// - CONFIRMING_SLEEP: Needs 10 min without movement to confirm sleep
+  /// - SLEEP_CONFIRMED: User is sleeping (once confirmed, movement doesn't force back to awake)
   int detectMovementChange({
     required int currentSteps,
     required int currentCalories,
@@ -163,7 +189,7 @@ class _RealtimeStatsTracker {
     double? hrv,
   }) {
     // ✅ First call: initialize previous values
-    if (previousSteps == null) {
+    if (previousMovementState == null) {
       previousSteps = currentSteps;
       previousCalories = currentCalories;
       previousUnknown3 = currentUnknown3;
@@ -181,58 +207,71 @@ class _RealtimeStatsTracker {
     // 🎯 Apply smoothing filter (mode window of 20 readings ~100 seconds)
     final smoothed = _movementFilter.apply(rawMovement);
 
-    // --- Movement Latch logic ---
-    // 🔒 LATCH BEHAVIOR (tuned from real overnight data analysis):
-    //
-    // Detects awake/active state: When user is moving (rawMovement==1), latch
-    // activates immediately. Remains latched until sufficient consecutive zeros
-    // (no movement) are observed, indicating user has settled and likely sleeping.
-    //
-    // Key insight: Movement is sparse (8 events in 6+ hours) and clustered during
-    // pre-sleep activity. Latch helps distinguish:
-    // - Pre-sleep restlessness (multiple quick transitions) → held as 1
-    // - Sleep with micro-movements → released to 0 after stable period
-    //
-    // Tuning parameters (calibrated on real overnight log):
-    // - releaseZerosThreshold = 20: ~20 seconds of no movement to release
-    // - hrReleaseZeros = 5: release faster (~5s) if HRV indicates deep sleep
-    //
-    // Analysis results from realtime_stats_20251022_014742.log (01:47-07:56):
-    // - Config (20, 5): 10 transitions, avg latch 26s, 2.5% of time latched
-    // - Captures pre-sleep period (~1 min) as continuous activity
-    // - Releases cleanly once actual sleep detected (HRV < 10)
-    const int releaseZerosThreshold = 20; // ~20 seconds (configurable)
-    const int hrReleaseZeros = 5; // ~5 seconds if HRV < 10 (deep sleep)
+    // 🔄 State machine logic: Awake → Sleeping confirmation
+    if (smoothed == 1) {
+      // Movement detected
+      _stateTransitionCounter++;
 
-    // Initialize latch state if first time
-    _movementLatched ??= false;
-    _consecutiveZeros ??= 0;
-
-    if (rawMovement == 1) {
-      // Immediate latch on actual movement detection (user awake/active)
-      _movementLatched = true;
-      _consecutiveZeros = 0;
-    } else {
-      // rawMovement == 0
-      if (_movementLatched == true) {
-        _consecutiveZeros = (_consecutiveZeros ?? 0) + 1;
-
-        // If HRV indicates deep sleep and we have a few zeros, release earlier
-        if (hrv != null &&
-            hrv < 10 &&
-            (_consecutiveZeros ?? 0) >= hrReleaseZeros) {
-          _movementLatched = false;
-          _consecutiveZeros = 0;
-        } else if ((_consecutiveZeros ?? 0) >= releaseZerosThreshold) {
-          // Release latch: sufficient raw zeros observed
-          _movementLatched = false;
-          _consecutiveZeros = 0;
+      if (_sleepState == _SleepStateEnum.confirmingAwake) {
+        // Waiting for 2.5 min of sustained movement to confirm AWAKE
+        if (_stateTransitionCounter >= _confirmAwakeThreshold) {
+          _sleepState = _SleepStateEnum.awake;
+          _stateTransitionCounter = 0;
+          debugPrint(
+            '   🔄 STATE: CONFIRMING_AWAKE → AWAKE (2.5 min sustained movement)',
+          );
         }
+      } else if (_sleepState == _SleepStateEnum.confirmingSleep) {
+        // Movement detected during sleep confirmation: reset to confirming awake
+        _sleepState = _SleepStateEnum.confirmingAwake;
+        _stateTransitionCounter = 0;
+        debugPrint(
+          '   🔄 STATE: CONFIRMING_SLEEP → CONFIRMING_AWAKE (movement detected)',
+        );
+      } else if (_sleepState == _SleepStateEnum.sleepConfirmed) {
+        // IMPORTANT: Once sleep is confirmed, isolated movement does NOT change state
+        // Only HRV determines phases. This preserves REM detection.
+        debugPrint(
+          '   🔄 STATE: SLEEP_CONFIRMED (movement ignored, HRV determines phases)',
+        );
+      }
+    } else {
+      // No movement detected (smoothed == 0)
+      _stateTransitionCounter++;
+
+      if (_sleepState == _SleepStateEnum.confirmingAwake) {
+        // Already confirming awake, continue
+      } else if (_sleepState == _SleepStateEnum.awake) {
+        // Transition to CONFIRMING_SLEEP: waiting for 10 min without movement
+        _sleepState = _SleepStateEnum.confirmingSleep;
+        _stateTransitionCounter = 0;
+        debugPrint(
+          '   🔄 STATE: AWAKE → CONFIRMING_SLEEP (starting 10 min timer)',
+        );
+      } else if (_sleepState == _SleepStateEnum.confirmingSleep) {
+        // Waiting for 10 min without movement
+        if (_stateTransitionCounter >= _confirmSleepThreshold) {
+          _sleepState = _SleepStateEnum.sleepConfirmed;
+          _stateTransitionCounter = 0;
+          debugPrint(
+            '   🔄 STATE: CONFIRMING_SLEEP → SLEEP_CONFIRMED (10 min no movement)',
+          );
+        }
+      } else if (_sleepState == _SleepStateEnum.sleepConfirmed) {
+        // Remain in sleep confirmed state
       }
     }
 
-    // Result prefers latch state; otherwise use smoothed value
-    final result = (_movementLatched == true) ? 1 : smoothed;
+    // Determine final movement output based on current state
+    int result;
+    if (_sleepState == _SleepStateEnum.awake) {
+      result = 1; // User is confirmed awake
+    } else if (_sleepState == _SleepStateEnum.confirmingAwake) {
+      result = smoothed; // Still confirming, use smoothed value
+    } else {
+      // CONFIRMING_SLEEP or SLEEP_CONFIRMED
+      result = 0; // User is sleeping (or transitioning to sleep)
+    }
 
     final changed =
         previousMovementState != null && previousMovementState != result;
@@ -245,9 +284,8 @@ class _RealtimeStatsTracker {
     previousUnknown3 = currentUnknown3;
 
     if (changed) {
-      final releaseReason = hrv != null && hrv < 10 ? 'hrv<10' : 'stable_zeros';
       debugPrint(
-        '   📊 MOVEMENT: $previousMovementState->$result | raw=$rawMovement smoothed=$smoothed latched=${(_movementLatched == true ? 1 : 0)} | hrv=${hrv?.toStringAsFixed(1) ?? "?"}ms consecZeros=${_consecutiveZeros ?? 0} reason=$releaseReason',
+        '   📊 MOVEMENT: $previousMovementState→$result | raw=$rawMovement smoothed=$smoothed state=$_sleepState counter=$_stateTransitionCounter | hrv=${hrv?.toStringAsFixed(1) ?? "?"}ms',
       );
     }
 
@@ -266,24 +304,29 @@ class _RealtimeStatsTracker {
   /// NOTE: Conservative thresholds to avoid false positives when user is awake but relaxed
 
   /// Interpret combined sleep state from movement + HRV
+  /// 🔄 UPDATED: Once SLEEP_CONFIRMED, movement does NOT affect phase classification
   /// Returns: 'awake', 'rem', 'light_sleep', or 'deep_sleep'
   String interpretSleepState(int movement, double hrv) {
-    // If latched movement detected, user is awake/active regardless of HRV
-    if (movement == 1) {
-      return 'awake';
+    // Check if still in transitional states (not yet confirmed sleeping)
+    if (_sleepState != _SleepStateEnum.sleepConfirmed) {
+      // If user is confirmed AWAKE or in confirmation phases, respect movement
+      if (movement == 1) {
+        return 'awake';
+      }
     }
 
-    // No movement: use HRV to distinguish sleep stages (conservative thresholds)
+    // Once SLEEP_CONFIRMED or movement=0: use ONLY HRV to determine phases
+    // This guarantees that isolated movements during sleep don't mask REM detection
     if (hrv < 10) {
       return 'deep_sleep';
     } else if (hrv < 20) {
       return 'light_sleep';
     } else if (hrv < 30) {
-      // Transition zone (20-30ms): User is likely relaxed but still awake
-      // Don't call it REM to avoid false positives
+      // Transition zone (20-30ms): Resting/relaxed
       return 'light_sleep';
     } else {
-      // HRV >= 30 with no movement = REM (active dreaming, confirmed by real data)
+      // HRV >= 30 = REM (active dreaming)
+      // Now guaranteed to work even if there's isolated movement during sleep
       return 'rem';
     }
   }
