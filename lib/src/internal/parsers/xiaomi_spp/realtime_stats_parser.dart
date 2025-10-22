@@ -260,8 +260,10 @@ class _RealtimeStatsTracker {
   /// Approximation from equally-sampled HR values
   /// Calibrated from real overnight data (6+ hours):
   /// - Low HRV (<10) = deep sleep, parasympathetic dominant (observed 8-13ms)
-  /// - Medium HRV (10-25) = light sleep, balanced (observed 13-25ms)
-  /// - High HRV (>25) = REM/stress, sympathetic active, low parasympathetic (observed 25-64ms)
+  /// - Medium HRV (10-20) = light sleep, stable (observed 13-20ms during real sleep)
+  /// - Transition zone (20-30) = relajation/awake calm, avoid false positives (observed 10-16ms when awake but still)
+  /// - High HRV (>30) = REM/active dreaming, sympathetic active (observed 25-90ms during actual REM)
+  /// NOTE: Conservative thresholds to avoid false positives when user is awake but relaxed
 
   /// Interpret combined sleep state from movement + HRV
   /// Returns: 'awake', 'rem', 'light_sleep', or 'deep_sleep'
@@ -271,13 +273,17 @@ class _RealtimeStatsTracker {
       return 'awake';
     }
 
-    // No movement: use HRV to distinguish sleep stages
+    // No movement: use HRV to distinguish sleep stages (conservative thresholds)
     if (hrv < 10) {
       return 'deep_sleep';
-    } else if (hrv < 25) {
+    } else if (hrv < 20) {
+      return 'light_sleep';
+    } else if (hrv < 30) {
+      // Transition zone (20-30ms): User is likely relaxed but still awake
+      // Don't call it REM to avoid false positives
       return 'light_sleep';
     } else {
-      // HRV > 25 with no movement = REM (active dreaming)
+      // HRV >= 30 with no movement = REM (active dreaming, confirmed by real data)
       return 'rem';
     }
   }
