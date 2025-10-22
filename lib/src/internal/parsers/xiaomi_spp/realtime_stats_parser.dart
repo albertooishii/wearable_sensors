@@ -245,17 +245,10 @@ class _RealtimeStatsTracker {
     previousUnknown3 = currentUnknown3;
 
     if (changed) {
-      if (result == 1) {
-        debugPrint(
-          '   📊 MOVEMENT DETECTOR: ▶️ START_LATCHED (raw: $rawMovement, smoothed: $smoothed) - User likely awake',
-        );
-      } else {
-        final releaseReason =
-            hrv != null && hrv < 10 ? 'HRV<10(deep_sleep)' : 'stable_zeros';
-        debugPrint(
-          '   📊 MOVEMENT DETECTOR: ⏹️ STOP_LATCHED (released via: $releaseReason, consecZeros: ${_consecutiveZeros ?? 0}) - User settling/sleeping',
-        );
-      }
+      final releaseReason = hrv != null && hrv < 10 ? 'hrv<10' : 'stable_zeros';
+      debugPrint(
+        '   📊 MOVEMENT: $previousMovementState->$result | raw=$rawMovement smoothed=$smoothed latched=${(_movementLatched == true ? 1 : 0)} | hrv=${hrv?.toStringAsFixed(1) ?? "?"}ms consecZeros=${_consecutiveZeros ?? 0} reason=$releaseReason',
+      );
     }
 
     return result;
@@ -269,6 +262,26 @@ class _RealtimeStatsTracker {
   /// - Low HRV (<10) = deep sleep, parasympathetic dominant (observed 8-13ms)
   /// - Medium HRV (10-25) = light sleep, balanced (observed 13-25ms)
   /// - High HRV (>25) = REM/stress, sympathetic active, low parasympathetic (observed 25-64ms)
+
+  /// Interpret combined sleep state from movement + HRV
+  /// Returns: 'awake', 'rem', 'light_sleep', or 'deep_sleep'
+  String interpretSleepState(int movement, double hrv) {
+    // If latched movement detected, user is awake/active regardless of HRV
+    if (movement == 1) {
+      return 'awake';
+    }
+
+    // No movement: use HRV to distinguish sleep stages
+    if (hrv < 10) {
+      return 'deep_sleep';
+    } else if (hrv < 25) {
+      return 'light_sleep';
+    } else {
+      // HRV > 25 with no movement = REM (active dreaming)
+      return 'rem';
+    }
+  }
+
   double calculateHRV(int currentHR) {
     // Add current HR to history
     _hrHistory.add(currentHR);
@@ -439,9 +452,12 @@ class XiaomiSppRealtimeStatsParser {
               'data_type_name': 'hrv_sdnn',
               'note':
                   'Standard deviation of RR intervals (calculated from HR history)',
-              'interpretation': hrv < 10
+              'hrv_only': hrv < 10
                   ? 'deep_sleep'
                   : (hrv < 25 ? 'light_sleep' : 'rem_or_stressed'),
+              // Combined interpretation with movement
+              'interpretation':
+                  tracker.interpretSleepState(movementBinary, hrv),
             },
           ),
         );
