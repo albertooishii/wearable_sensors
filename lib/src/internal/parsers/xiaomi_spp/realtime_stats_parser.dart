@@ -134,9 +134,10 @@ class _RealtimeStatsTracker {
   ///
   /// HRV = standard deviation of RR intervals (time between beats)
   /// Approximation from equally-sampled HR values
-  /// - Low HRV (<5) = deep sleep, parasympathetic dominant
-  /// - Medium HRV (5-20) = light sleep, balanced
-  /// - High HRV (>20) = REM/stress, sympathetic active, low parasympathetic
+  /// Calibrated from real overnight data (6+ hours):
+  /// - Low HRV (<10) = deep sleep, parasympathetic dominant (observed 8-13ms)
+  /// - Medium HRV (10-25) = light sleep, balanced (observed 13-25ms)
+  /// - High HRV (>25) = REM/stress, sympathetic active, low parasympathetic (observed 25-64ms)
   double calculateHRV(int currentHR) {
     // Add current HR to history
     _hrHistory.add(currentHR);
@@ -306,9 +307,9 @@ class XiaomiSppRealtimeStatsParser {
               'data_type_name': 'hrv_sdnn',
               'note':
                   'Standard deviation of RR intervals (calculated from HR history)',
-              'interpretation': hrv < 5
+              'interpretation': hrv < 10
                   ? 'deep_sleep'
-                  : (hrv < 20 ? 'light_sleep' : 'rem_or_stressed'),
+                  : (hrv < 25 ? 'light_sleep' : 'rem_or_stressed'),
             },
           ),
         );
