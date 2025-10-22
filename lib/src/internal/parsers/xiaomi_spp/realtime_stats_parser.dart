@@ -172,7 +172,8 @@ class _RealtimeStatsTracker {
 
   // Thresholds for state transitions:
   static const int _confirmAwakeThreshold = 150; // 2.5 min at 1Hz
-  static const int _confirmSleepThreshold = 600; // 10 min at 1Hz
+  static const int _confirmSleepThreshold =
+      1200; // 20 min at 1Hz (conservative: ensures real sleep before REM detection)
 
   /// Detect if movement has changed (binary detector)
   /// Movement = 1 if ANY of (steps, calories, unknown3) changed
@@ -193,8 +194,8 @@ class _RealtimeStatsTracker {
       previousSteps = currentSteps;
       previousCalories = currentCalories;
       previousUnknown3 = currentUnknown3;
-      previousMovementState = 0; // Start with no movement
-      return 0;
+      previousMovementState = 1; // Start as awake (default assumption)
+      return 1;
     }
 
     // ✅ Subsequent calls: detect if any value changed (raw binary)
