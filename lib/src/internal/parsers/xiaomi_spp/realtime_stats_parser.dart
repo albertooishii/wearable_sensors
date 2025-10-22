@@ -147,6 +147,10 @@ class _RealtimeStatsTracker {
 
   // ✨ NEW: Track movement as binary (0 = no movement, 1 = movement detected)
   int? previousMovementState;
+  // 🔒 Movement latch state: once movement detected, remain latched until
+  // N consecutive zeros are observed
+  bool? _movementLatched;
+  int? _consecutiveZeros;
 
   /// Detect if movement has changed (binary detector)
   /// Movement = 1 if ANY of (steps, calories, unknown3) changed
@@ -156,6 +160,7 @@ class _RealtimeStatsTracker {
     required int currentSteps,
     required int currentCalories,
     required int currentUnknown3,
+    double? hrv,
   }) {
     // ✅ First call: initialize previous values
     if (previousSteps == null) {
@@ -174,12 +179,50 @@ class _RealtimeStatsTracker {
         : 0;
 
     // 🎯 Apply smoothing filter (mode window of 20 readings ~100 seconds)
-    final smoothedMovement = _movementFilter.apply(rawMovement);
+    final smoothed = _movementFilter.apply(rawMovement);
 
-    final changed = previousMovementState != null &&
-        previousMovementState != smoothedMovement;
+    // --- Movement Latch logic ---
+    // Activate latch immediately on RAW movement (rawMovement == 1)
+    // and keep latched until we observe enough consecutive RAW zeros
+    // indicating the user actually settled. Optionally allow HRV to
+    // release earlier if it indicates deep sleep.
+    const int releaseZerosThreshold = 20; // configurable (readings)
+    const int hrReleaseZeros = 5; // fewer zeros if HRV indicates sleep
 
-    previousMovementState = smoothedMovement;
+    // Initialize latch state if first time
+    _movementLatched ??= false;
+    _consecutiveZeros ??= 0;
+
+    if (rawMovement == 1) {
+      // Immediate latch on actual movement detection (user awake/active)
+      _movementLatched = true;
+      _consecutiveZeros = 0;
+    } else {
+      // rawMovement == 0
+      if (_movementLatched == true) {
+        _consecutiveZeros = (_consecutiveZeros ?? 0) + 1;
+
+        // If HRV indicates deep sleep and we have a few zeros, release earlier
+        if (hrv != null &&
+            hrv < 10 &&
+            (_consecutiveZeros ?? 0) >= hrReleaseZeros) {
+          _movementLatched = false;
+          _consecutiveZeros = 0;
+        } else if ((_consecutiveZeros ?? 0) >= releaseZerosThreshold) {
+          // Release latch: sufficient raw zeros observed
+          _movementLatched = false;
+          _consecutiveZeros = 0;
+        }
+      }
+    }
+
+    // Result prefers latch state; otherwise use smoothed value
+    final result = (_movementLatched == true) ? 1 : smoothed;
+
+    final changed =
+        previousMovementState != null && previousMovementState != result;
+
+    previousMovementState = result;
 
     // ✅ UPDATE: Save current values for next comparison
     previousSteps = currentSteps;
@@ -187,13 +230,13 @@ class _RealtimeStatsTracker {
     previousUnknown3 = currentUnknown3;
 
     if (changed) {
-      final changeLabel = smoothedMovement == 1 ? 'START' : 'STOP';
+      final changeLabel = result == 1 ? 'START_LATCHED' : 'STOP_LATCHED';
       debugPrint(
-        '   📊 MOVEMENT DETECTOR: $changeLabel MOVEMENT (raw: $rawMovement, smoothed: $smoothedMovement)',
+        '   📊 MOVEMENT DETECTOR: $changeLabel (raw: $rawMovement, smoothed: $smoothed, result: $result)',
       );
     }
 
-    return smoothedMovement;
+    return result;
   }
 
   /// ✨ NEW: Calculate HRV from HR history (Heart Rate Variability)
@@ -340,6 +383,7 @@ class XiaomiSppRealtimeStatsParser {
           currentSteps: stats.steps,
           currentCalories: stats.calories,
           currentUnknown3: stats.unknown3,
+          hrv: hrv,
         );
       }
 
