@@ -8,23 +8,6 @@ import '../../models/biometric_sample.dart';
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
 
-/// 🔄 Sleep State Machine: Manages transition from Awake → Sleeping
-///
-/// States:
-/// - CONFIRMING_AWAKE: Waiting for 2.5 min of movement to confirm user is awake
-/// - AWAKE: User confirmed awake (has movement or activity)
-/// - CONFIRMING_SLEEP: Waiting for 10 min without movement to confirm sleep
-/// - SLEEP_CONFIRMED: User confirmed sleeping (10 min without movement)
-///
-/// Once SLEEP_CONFIRMED, movement does NOT force back to AWAKE.
-/// Phases (Deep/Light/REM) determined by HRV only once sleeping.
-enum _SleepStateEnum {
-  confirmingAwake,
-  awake,
-  confirmingSleep,
-  sleepConfirmed,
-}
-
 /// 🎯 Movement Filter: Smooths binary movement detection using mode window
 ///
 /// Problem: Raw movement detection produces false positives during transitions
@@ -33,6 +16,10 @@ enum _SleepStateEnum {
 /// Solution: Apply a sliding mode window to the binary movement stream
 /// - Window size 20: Requires sustained movement for ~20 readings (~100 seconds)
 /// - Only flips to 1 if majority of recent readings show movement
+///
+/// NOTE: This is a sensor-level filter for movement normalization.
+/// Sleep phase determination (awake/sleeping) is handled by application layer
+/// (dream_incubator SleepStateClassifier) after collecting sufficient data.
 class _MovementFilter {
   final int windowSize;
   final List<int> _buffer = [];
@@ -114,7 +101,13 @@ class _MovementFilter {
 /// }
 /// ```
 
-/// Singleton to track previous values for change detection
+/// Singleton to track previous values for change detection and HRV calculation
+///
+/// NOTE: State machine logic (CONFIRMING_AWAKE → SLEEP_CONFIRMED) has been moved
+/// to dream_incubator's SleepStateClassifier for better separation of concerns.
+/// This tracker now focuses on:
+/// - Raw binary movement detection (changed any of steps/calories/unknown3)
+/// - HRV calculation from HR history
 class _RealtimeStatsTracker {
   static final _RealtimeStatsTracker _instance =
       _RealtimeStatsTracker._internal();
@@ -130,11 +123,11 @@ class _RealtimeStatsTracker {
   int? previousUnknown5;
   int? previousCalories;
 
-  // ✨ NEW: Track HR history for HRV calculation
+  // ✨ Track HR history for HRV calculation
   final List<int> _hrHistory = [];
   static const int _maxHrHistorySize = 120; // ~2 minutes at 1Hz
 
-  // 🎯 NEW: Movement filter for smoothing binary detection
+  // 🎯 Movement filter for smoothing binary detection
   // Window of 20 readings (~100 seconds) to eliminate false positives
   final _MovementFilter _movementFilter = _MovementFilter(windowSize: 20);
 
@@ -162,185 +155,70 @@ class _RealtimeStatsTracker {
     return updated;
   }
 
-  // ✨ NEW: Track movement as binary (0 = no movement, 1 = movement detected)
-  int? previousMovementState;
-
-  // 🔄 NEW: Sleep State Machine for Awake/Sleeping confirmation
-  _SleepStateEnum _sleepState = _SleepStateEnum.confirmingAwake;
-  int _stateTransitionCounter =
-      0; // Counts consecutive zeros/movements in current state
-
-  // Thresholds for state transitions:
-  static const int _confirmAwakeThreshold = 150; // 2.5 min at 1Hz
-  static const int _confirmSleepThreshold =
-      1200; // 20 min at 1Hz (conservative: ensures real sleep before REM detection)
-
-  /// Detect if movement has changed (binary detector)
-  /// Movement = 1 if ANY of (steps, calories, unknown3) changed
-  /// Movement = 0 if NONE changed
-  /// 🎯 Uses state machine to confirm Awake/Sleeping transitions:
-  /// - CONFIRMING_AWAKE: Needs 2.5 min of movement to confirm awake
-  /// - AWAKE: User is awake (movement detected)
-  /// - CONFIRMING_SLEEP: Needs 10 min without movement to confirm sleep
-  /// - SLEEP_CONFIRMED: User is sleeping (once confirmed, movement doesn't force back to awake)
+  /// Detect if movement has changed (binary detector, no state machine)
+  /// Returns: 1 if ANY of (steps, calories, unknown3) changed, 0 otherwise
+  /// Applies smoothing filter to reduce false positives during transitions
   int detectMovementChange({
     required int currentSteps,
     required int currentCalories,
     required int currentUnknown3,
-    double? hrv,
   }) {
-    // ✅ First call: initialize previous values
-    if (previousMovementState == null) {
+    // First call: initialize previous values
+    if (previousSteps == null) {
       previousSteps = currentSteps;
       previousCalories = currentCalories;
       previousUnknown3 = currentUnknown3;
-      previousMovementState = 1; // Start as awake (default assumption)
-      // 🚀 CRITICAL: Force movement state machine to CONFIRMING_AWAKE at startup
-      // This ensures first HRV reading sees movement=1, not 0
-      _sleepState = _SleepStateEnum.confirmingAwake;
-      _stateTransitionCounter = 0;
-      debugPrint(
-        '   🔄 STATE MACHINE INITIALIZED: CONFIRMING_AWAKE (user assumed awake at startup)',
-      );
-      return 1;
+      debugPrint('   📊 MOVEMENT: Initialized (assume awake)');
+      return 1; // Assume awake at startup
     }
 
-    // ✅ Subsequent calls: detect if any value changed (raw binary)
+    // Detect if any value changed (raw binary)
     final rawMovement = (currentSteps != previousSteps ||
             currentCalories != previousCalories ||
             currentUnknown3 != previousUnknown3)
         ? 1
         : 0;
 
-    // 🎯 Apply smoothing filter (mode window of 20 readings ~100 seconds)
+    // Apply smoothing filter (mode window of 20 readings ~100 seconds)
     final smoothed = _movementFilter.apply(rawMovement);
 
-    // 🔄 State machine logic: Awake → Sleeping confirmation
-    if (smoothed == 1) {
-      // Movement detected
-      _stateTransitionCounter++;
+    // Debug log when movement state changes
+    final previousSmoothed = _movementFilter._buffer.length >= 2
+        ? (_movementFilter._buffer[_movementFilter._buffer.length - 2])
+        : smoothed;
 
-      if (_sleepState == _SleepStateEnum.confirmingAwake) {
-        // Waiting for 2.5 min of sustained movement to confirm AWAKE
-        if (_stateTransitionCounter >= _confirmAwakeThreshold) {
-          _sleepState = _SleepStateEnum.awake;
-          _stateTransitionCounter = 0;
-          debugPrint(
-            '   🔄 STATE: CONFIRMING_AWAKE → AWAKE (2.5 min sustained movement)',
-          );
-        }
-      } else if (_sleepState == _SleepStateEnum.confirmingSleep) {
-        // Movement detected during sleep confirmation: reset to confirming awake
-        _sleepState = _SleepStateEnum.confirmingAwake;
-        _stateTransitionCounter = 0;
-        debugPrint(
-          '   🔄 STATE: CONFIRMING_SLEEP → CONFIRMING_AWAKE (movement detected)',
-        );
-      } else if (_sleepState == _SleepStateEnum.sleepConfirmed) {
-        // IMPORTANT: Once sleep is confirmed, isolated movement does NOT change state
-        // Only HRV determines phases. This preserves REM detection.
-        debugPrint(
-          '   🔄 STATE: SLEEP_CONFIRMED (movement ignored, HRV determines phases)',
-        );
-      }
-    } else {
-      // No movement detected (smoothed == 0)
-      _stateTransitionCounter++;
+    if (smoothed != previousSmoothed || rawMovement == 1) {
+      final deltaSteps = currentSteps - (previousSteps ?? 0);
+      final deltaCal = currentCalories - (previousCalories ?? 0);
+      final deltaUnk3 = currentUnknown3 - (previousUnknown3 ?? 0);
 
-      if (_sleepState == _SleepStateEnum.confirmingAwake) {
-        // Already confirming awake, continue
-      } else if (_sleepState == _SleepStateEnum.awake) {
-        // Transition to CONFIRMING_SLEEP: waiting for 10 min without movement
-        _sleepState = _SleepStateEnum.confirmingSleep;
-        _stateTransitionCounter = 0;
-        debugPrint(
-          '   🔄 STATE: AWAKE → CONFIRMING_SLEEP (starting 10 min timer)',
-        );
-      } else if (_sleepState == _SleepStateEnum.confirmingSleep) {
-        // Waiting for 10 min without movement
-        if (_stateTransitionCounter >= _confirmSleepThreshold) {
-          _sleepState = _SleepStateEnum.sleepConfirmed;
-          _stateTransitionCounter = 0;
-          debugPrint(
-            '   🔄 STATE: CONFIRMING_SLEEP → SLEEP_CONFIRMED (10 min no movement)',
-          );
-        }
-      } else if (_sleepState == _SleepStateEnum.sleepConfirmed) {
-        // Remain in sleep confirmed state
-      }
+      debugPrint(
+        '   📊 MOVEMENT: raw=$rawMovement → smoothed=$smoothed '
+        '| window=${_movementFilter._buffer.length}/20 '
+        '| Δsteps=$deltaSteps Δcal=$deltaCal Δunk3=$deltaUnk3',
+      );
     }
 
-    // Determine final movement output based on current state
-    int result;
-    if (_sleepState == _SleepStateEnum.awake) {
-      result = 1; // User is confirmed awake
-    } else if (_sleepState == _SleepStateEnum.confirmingAwake) {
-      // 🚀 CRITICAL: During confirmation phase, assume awake (=1)
-      // Don't use smoothed value - we want to be aggressively awake until proven sleeping
-      // This ensures first readings show movement=1, allowing proper HRV interpretation
-      result = 1;
-    } else {
-      // CONFIRMING_SLEEP or SLEEP_CONFIRMED
-      result = 0; // User is sleeping (or transitioning to sleep)
-    }
-
-    final changed =
-        previousMovementState != null && previousMovementState != result;
-
-    previousMovementState = result;
-
-    // ✅ UPDATE: Save current values for next comparison
+    // Save current values for next comparison
     previousSteps = currentSteps;
     previousCalories = currentCalories;
     previousUnknown3 = currentUnknown3;
 
-    if (changed) {
-      debugPrint(
-        '   📊 MOVEMENT: $previousMovementState→$result | raw=$rawMovement smoothed=$smoothed state=$_sleepState counter=$_stateTransitionCounter | hrv=${hrv?.toStringAsFixed(1) ?? "?"}ms',
-      );
-    }
-
-    return result;
+    return smoothed;
   }
 
-  /// ✨ NEW: Calculate HRV from HR history (Heart Rate Variability)
+  /// Calculate HRV from HR history (Heart Rate Variability)
   ///
   /// HRV = standard deviation of RR intervals (time between beats)
   /// Approximation from equally-sampled HR values
   /// Calibrated from real overnight data (6+ hours):
   /// - Low HRV (<10) = deep sleep, parasympathetic dominant (observed 8-13ms)
   /// - Medium HRV (10-20) = light sleep, stable (observed 13-20ms during real sleep)
-  /// - Transition zone (20-30) = relajation/awake calm, avoid false positives (observed 10-16ms when awake but still)
+  /// - Transition zone (20-30) = relaxation/awake calm, avoid false positives (observed 10-16ms when awake but still)
   /// - High HRV (>30) = REM/active dreaming, sympathetic active (observed 25-90ms during actual REM)
-  /// NOTE: Conservative thresholds to avoid false positives when user is awake but relaxed
-
-  /// Interpret combined sleep state from movement + HRV
-  /// 🔄 UPDATED: Once SLEEP_CONFIRMED, movement does NOT affect phase classification
-  /// Returns: 'awake', 'rem', 'light_sleep', or 'deep_sleep'
-  String interpretSleepState(int movement, double hrv) {
-    // Check if still in transitional states (not yet confirmed sleeping)
-    if (_sleepState != _SleepStateEnum.sleepConfirmed) {
-      // If user is confirmed AWAKE or in confirmation phases, respect movement
-      if (movement == 1) {
-        return 'awake';
-      }
-    }
-
-    // Once SLEEP_CONFIRMED or movement=0: use ONLY HRV to determine phases
-    // This guarantees that isolated movements during sleep don't mask REM detection
-    if (hrv < 10) {
-      return 'deep_sleep';
-    } else if (hrv < 20) {
-      return 'light_sleep';
-    } else if (hrv < 30) {
-      // Transition zone (20-30ms): Resting/relaxed
-      return 'light_sleep';
-    } else {
-      // HRV >= 30 = REM (active dreaming)
-      // Now guaranteed to work even if there's isolated movement during sleep
-      return 'rem';
-    }
-  }
+  ///
+  /// NOTE: Sleep phase classification thresholds have been moved to
+  /// dream_incubator's SleepStateClassifier for application-specific logic
 
   double calculateHRV(int currentHR) {
     // Add current HR to history
@@ -469,7 +347,9 @@ class XiaomiSppRealtimeStatsParser {
       double hrv = 0.0;
       int movementBinary = 0;
 
-      if (stats.hasHeartRate() && stats.heartRate > 10) {
+      // Only calculate HRV for physiologically valid HR values
+      if (stats.hasHeartRate() &&
+          isValidHeartRate(stats.heartRate.toDouble())) {
         hrv = tracker.calculateHRV(stats.heartRate);
       }
 
@@ -478,13 +358,13 @@ class XiaomiSppRealtimeStatsParser {
           currentSteps: stats.steps,
           currentCalories: stats.calories,
           currentUnknown3: stats.unknown3,
-          hrv: hrv,
         );
       }
 
       // 4. Parse Heart Rate (most critical for lucid dreaming)
-      if (stats.hasHeartRate() && stats.heartRate > 10) {
-        // Ignore HR <= 10 (invalid/measuring)
+      // Only include physiologically valid HR values (40-220 BPM)
+      if (stats.hasHeartRate() &&
+          isValidHeartRate(stats.heartRate.toDouble())) {
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -494,7 +374,7 @@ class XiaomiSppRealtimeStatsParser {
               'unit': 'bpm',
               'source': 'xiaomi_spp_realtime',
               'transport': 'bt_classic',
-              'valid': stats.heartRate >= 40 && stats.heartRate <= 220,
+              'valid': true, // Already validated above
             },
           ),
         );
@@ -512,33 +392,30 @@ class XiaomiSppRealtimeStatsParser {
               'data_type_name': 'hrv_sdnn',
               'note':
                   'Standard deviation of RR intervals (calculated from HR history)',
-              'hrv_only': hrv < 10
-                  ? 'deep_sleep'
-                  : (hrv < 25 ? 'light_sleep' : 'rem_or_stressed'),
-              // Combined interpretation with movement
-              'interpretation':
-                  tracker.interpretSleepState(movementBinary, hrv),
+              'raw_hrv_value': hrv,
             },
           ),
         );
       }
 
-      // ✨ NEW: Add binary movement detection
-      samples.add(
-        BiometricSample(
-          timestamp: timestamp,
-          value: movementBinary.toDouble(),
-          sensorType: SensorType.movementDetected,
-          metadata: {
-            'unit': 'binary',
-            'source': 'xiaomi_spp_movement_detector',
-            'transport': 'bt_classic',
-            'data_type_name': 'movement_detected',
-            'note':
-                '1=movement detected (steps|calories|unknown3 changed), 0=no movement',
-          },
-        ),
-      );
+      // ✨ NEW: Add binary movement detection (only if there's actually movement data)
+      if (stats.hasSteps() || stats.hasCalories() || stats.hasUnknown3()) {
+        samples.add(
+          BiometricSample(
+            timestamp: timestamp,
+            value: movementBinary.toDouble(),
+            sensorType: SensorType.movementDetected,
+            metadata: {
+              'unit': 'binary',
+              'source': 'xiaomi_spp_movement_detector',
+              'transport': 'bt_classic',
+              'data_type_name': 'movement_detected',
+              'note':
+                  '1=movement detected (steps|calories|unknown3 changed), 0=no movement',
+            },
+          ),
+        );
+      }
 
       // 5. Parse Movement Intensity (via unknown3 - activity proxy)
       // This field increases during physical activity (Gadgetbridge finding)
