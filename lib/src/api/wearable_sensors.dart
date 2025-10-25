@@ -1396,7 +1396,6 @@ class WearableSensors {
   /// ```
   static bool isDeviceSupported(String deviceName) {
     // Import here to avoid circular dependency
-    // ignore: library_private_types_in_public_api
     return SupportedDevicesConfig.isSupported(deviceName);
   }
 
@@ -1422,7 +1421,6 @@ class WearableSensors {
   /// ```
   static Future<Map<String, dynamic>?> getDeviceInfo(String deviceName) async {
     // Import here to avoid circular dependency
-    // ignore: library_private_types_in_public_api
     final config = await SupportedDevicesConfig.detectDevice(deviceName);
 
     if (config == null) return null;
@@ -1453,7 +1451,6 @@ class WearableSensors {
   /// ```
   static Future<List<String>> getSupportedDevices({String? vendor}) async {
     // Import here to avoid circular dependency
-    // ignore: library_private_types_in_public_api
     if (vendor?.toLowerCase() == 'xiaomi') {
       return await SupportedDevicesConfig.getSupportedXiaomiModels();
     }

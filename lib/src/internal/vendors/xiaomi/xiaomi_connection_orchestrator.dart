@@ -853,7 +853,8 @@ class XiaomiConnectionOrchestrator extends VendorOrchestrator {
           final locale = params?['locale'] as String?;
           if (languageCode == null) {
             throw ArgumentError(
-                'language command requires value (language code)');
+              'language command requires value (language code)',
+            );
           }
           await commandService.setLanguage(
             languageCode: languageCode,

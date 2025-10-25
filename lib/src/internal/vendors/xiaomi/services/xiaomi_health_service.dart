@@ -78,13 +78,15 @@ class XiaomiHealthService {
           encrypted: true,
         );
         debugPrint(
-            '   ✅ REALTIME STATS STARTED - Device should now stream data!');
+          '   ✅ REALTIME STATS STARTED - Device should now stream data!',
+        );
       } else if (sppService != null) {
         // Path 2: Bonded device flow (BT_CLASSIC) - use SppService
         debugPrint('   📤 Sending START_REALTIME_STATS (BT_CLASSIC)');
         await sppService!.sendProtobufCommand(command: command);
         debugPrint(
-            '   ✅ REALTIME STATS STARTED - Device should now stream data!');
+          '   ✅ REALTIME STATS STARTED - Device should now stream data!',
+        );
       } else {
         debugPrint('   ⚠️ No transport available, cannot start realtime stats');
       }
