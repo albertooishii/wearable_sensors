@@ -18,7 +18,8 @@
         "permission_handler",
         "pointycastle",
         "protobuf",
-        "shared_preferences"
+        "shared_preferences",
+        "timezone"
       ],
       "devDependencies": [
         "flutter_lints",
@@ -65,6 +66,14 @@
         "stream_channel",
         "test_api",
         "vector_math"
+      ]
+    },
+    {
+      "name": "timezone",
+      "version": "0.10.1",
+      "dependencies": [
+        "http",
+        "path"
       ]
     },
     {
@@ -870,6 +879,26 @@
       "dependencies": [
         "collection",
         "meta"
+      ]
+    },
+    {
+      "name": "http",
+      "version": "1.5.0",
+      "dependencies": [
+        "async",
+        "http_parser",
+        "meta",
+        "web"
+      ]
+    },
+    {
+      "name": "http_parser",
+      "version": "4.1.2",
+      "dependencies": [
+        "collection",
+        "source_span",
+        "string_scanner",
+        "typed_data"
       ]
     }
   ],

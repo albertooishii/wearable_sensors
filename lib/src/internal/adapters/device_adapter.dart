@@ -7,6 +7,7 @@ import '../../api/models/wearable_device.dart';
 import '../models/bluetooth_device.dart';
 import '../utils/xiaomi_device_detection.dart';
 import '../storage/discovered_device_storage.dart';
+import '../vendors/xiaomi/xiaomi_device_credentials.dart';
 
 /// Adapter that converts between internal BluetoothDevice and public WearableDevice.
 ///
@@ -59,8 +60,11 @@ class DeviceAdapter {
     // Use REGEX patterns from Gadgetbridge for reliable detection
     if (_isXiaomiDevice(detectedDeviceTypeId, internal.name)) {
       authMethod = AuthenticationType.xiaomiSpp;
-      // Only require auth if NOT paired yet
-      // Paired devices might have credentials stored already
+
+      // Check if device has saved credentials
+      // ✅ NEW: Check for saved credentials via public API (requires async)
+      // If no credentials saved, mark as requiresAuth=true
+      // This will be checked later in _loadBondedDevices via enrichCheckCredentials()
       requiresAuth = !internal.paired;
     }
 
@@ -206,5 +210,23 @@ class DeviceAdapter {
 
     // Second: Use centralized Xiaomi detection patterns
     return XiaomiDeviceDetection.isXiaomiDevice(deviceName);
+  }
+
+  /// ✅ NEW: Check if bonded Xiaomi device has saved credentials
+  ///
+  /// For bonded Xiaomi devices, checks if they have authentication keys saved.
+  /// If a device is bonded BUT has no keys, it needs re-authentication.
+  ///
+  /// **Returns:** true if device has saved credentials, false if needs auth
+  static Future<bool> hasXiaomiCredentials(String deviceId) async {
+    try {
+      // Try to load credentials - if null, device has no auth key
+      final credentials = await XiaomiDeviceCredentials.load(deviceId);
+      return credentials != null;
+    } catch (e) {
+      // If check fails, assume no credentials (safer default)
+      // Device will be marked as requiresAuthentication=true
+      return false;
+    }
   }
 }

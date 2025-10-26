@@ -1,11 +1,10 @@
 import 'package:flutter/foundation.dart';
-import 'dart:io' show Platform;
-
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/protocol/v2/handler.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/protocol/v2/packet.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_spp_service.dart';
+import 'xiaomi_timezone_helper.dart';
 import 'xiaomi_health_service.dart';
 
 /// 🔧 Xiaomi Initialization Service
@@ -158,29 +157,42 @@ class XiaomiInitializationService {
 
       final now = DateTime.now();
 
+      // Device appears to have UTC+2 hardcoded internally and ignores zoneOffset.
+      // To show the correct time, we subtract the device's internal offset (2 hours)
+      // and let it add its 2 hours back.
+      //
+      // Example: Madrid UTC+2
+      //   - User time: 02:59 Madrid
+      //   - We send: 02:59 - 2 = 00:59
+      //   - Device adds 2: 00:59 + 2 = 02:59 ✓
+      const int deviceInternalOffset = 2; // Device has UTC+2 hardcoded
+      final timeToSend =
+          now.subtract(const Duration(hours: deviceInternalOffset));
+
       // Create Date structure
       final date = pb.Date.create()
-        ..year = now.year
-        ..month = now.month
-        ..day = now.day;
+        ..year = timeToSend.year
+        ..month = timeToSend.month
+        ..day = timeToSend.day;
 
       // Create Time structure
       final time = pb.Time.create()
-        ..hour = now.hour
-        ..minute = now.minute
-        ..second = now.second
-        ..millisecond = now.millisecond;
+        ..hour = timeToSend.hour
+        ..minute = timeToSend.minute
+        ..second = timeToSend.second
+        ..millisecond = timeToSend.millisecond;
 
       // Create TimeZone structure with system timezone
-      final offset =
-          now.timeZoneOffset.inMinutes ~/ 15; // Convert to 15-min blocks
+      // The device ignores zoneOffset and uses its internal UTC+2 hardcoded
+      // So we just send 0 for the offset
+      final offset = 0; // Device has its own internal offset
 
       // Get system timezone name
-      String tzName = _getSystemTimezoneName();
+      String tzName = XiaomiTimezoneHelper.getSystemTimezoneName();
 
       final timezone = pb.TimeZone.create()
         ..zoneOffset = offset
-        ..dstOffset = 0 // DST not calculated, can be enhanced
+        ..dstOffset = 0
         ..name = tzName;
 
       // Create Clock structure
@@ -197,11 +209,15 @@ class XiaomiInitializationService {
         ..system = (pb.System.create()..clock = clock);
 
       debugPrint(
-        '   📅 Current time: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '   📅 Local time: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
       );
       debugPrint(
-        '   🌍 System Timezone: $tzName (offset: $offset blocks of 15min)',
+        '   📅 Time to send (local - 2h): ${timeToSend.year}-${timeToSend.month.toString().padLeft(2, '0')}-${timeToSend.day.toString().padLeft(2, '0')} '
+        '${timeToSend.hour.toString().padLeft(2, '0')}:${timeToSend.minute.toString().padLeft(2, '0')}:${timeToSend.second.toString().padLeft(2, '0')}',
+      );
+      debugPrint(
+        '   🌍 Timezone: $tzName (device internal offset: UTC+2)',
       );
 
       if (sppV2Handler != null) {
@@ -228,28 +244,6 @@ class XiaomiInitializationService {
     } catch (e) {
       debugPrint('❌ Failed to sync device time: $e');
       // Don't rethrow - time sync is not critical for operation
-    }
-  }
-
-  /// Get system timezone name
-  ///
-  /// Detecta automáticamente desde las variables de entorno del sistema.
-  /// Fallback a UTC si no se detecta.
-  String _getSystemTimezoneName() {
-    try {
-      // Intentar obtener la zona horaria del entorno
-      final tzEnv = Platform.environment['TZ'];
-      if (tzEnv != null && tzEnv.isNotEmpty) {
-        debugPrint('   📍 Timezone del sistema: $tzEnv');
-        return tzEnv;
-      }
-
-      // Fallback a UTC
-      debugPrint('   📍 Timezone del sistema: UTC (default)');
-      return 'UTC';
-    } catch (e) {
-      debugPrint('   ⚠️  Error detectando timezone: $e');
-      return 'UTC';
     }
   }
 

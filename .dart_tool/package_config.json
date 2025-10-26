@@ -248,6 +248,18 @@
       "languageVersion": "3.3"
     },
     {
+      "name": "http",
+      "rootUri": "file:///home/albertooishii/.pub-cache/hosted/pub.dev/http-1.5.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
+      "name": "http_parser",
+      "rootUri": "file:///home/albertooishii/.pub-cache/hosted/pub.dev/http_parser-4.1.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
       "name": "js",
       "rootUri": "file:///home/albertooishii/.pub-cache/hosted/pub.dev/js-0.6.7",
       "packageUri": "lib/",
@@ -522,6 +534,12 @@
       "rootUri": "file:///home/albertooishii/.pub-cache/hosted/pub.dev/test_api-0.7.6",
       "packageUri": "lib/",
       "languageVersion": "3.5"
+    },
+    {
+      "name": "timezone",
+      "rootUri": "file:///home/albertooishii/.pub-cache/hosted/pub.dev/timezone-0.10.1",
+      "packageUri": "lib/",
+      "languageVersion": "2.19"
     },
     {
       "name": "typed_data",

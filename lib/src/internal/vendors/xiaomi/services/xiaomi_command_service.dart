@@ -4,6 +4,7 @@ import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/protocol/v2/handler.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/protocol/v2/packet.dart';
 import 'package:wearable_sensors/src/internal/vendors/xiaomi/xiaomi_spp_service.dart';
+import 'xiaomi_timezone_helper.dart';
 
 /// 🎮 Xiaomi Command Service
 ///
@@ -54,38 +55,28 @@ class XiaomiCommandService {
 
     try {
       dateTime ??= DateTime.now();
-      final tz = timezone ?? _getSystemTimezone();
-      final userOffset = _getTimezoneOffset(tz);
+      final tz = timezone ?? XiaomiTimezoneHelper.getSystemTimezoneName();
 
       // Device appears to have UTC+2 hardcoded and ignores zoneOffset field.
-      // To show the correct time, we need to send: (userLocalTime - deviceInternalOffset + userOffset)
-      // This way: device adds 2h → result shows userLocalTime
+      // To show the correct time, we just subtract the device's internal offset
+      // and let it add its 2 hours back.
       //
-      // Example: Madrid is UTC+2 (Oct), device is UTC+2
+      // Example: Madrid, device is UTC+2
       //   - User time: 14:00 Madrid
       //   - We send: 14:00 - 2 = 12:00
       //   - Device adds 2: 12:00 + 2 = 14:00 ✓
       //
-      // Example: New York is UTC-5, device is UTC+2
-      //   - User time: 08:00 NY
-      //   - Offset difference: UTC+2 - UTC-5 = 7 hours
-      //   - We send: 08:00 - 7 = 01:00
-      //   - Device adds 2: 01:00 + 2 = 03:00 (which is 08:00 NY adjusted to UTC+2) ✓
+      // The timezone name (e.g., 'Europe/Madrid') handles all DST logic on the device side.
 
       const int deviceInternalOffset = 2; // Device is UTC+2
-      final hoursToSubtract =
-          deviceInternalOffset; // Just subtract the device offset
       final adjustedDateTime =
-          dateTime.subtract(Duration(hours: hoursToSubtract));
+          dateTime.subtract(const Duration(hours: deviceInternalOffset));
 
       debugPrint(
-        '   Local time: ${dateTime.toIso8601String()} (timezone: $tz, UTC offset: $userOffset)',
+        '   Local time: ${dateTime.toIso8601String()} (timezone: $tz)',
       );
       debugPrint(
         '   Device internal offset: UTC+$deviceInternalOffset',
-      );
-      debugPrint(
-        '   Adjustment: subtracting $hoursToSubtract hours',
       );
       debugPrint(
         '   Time to send: ${adjustedDateTime.toIso8601String()}',
@@ -229,42 +220,6 @@ class XiaomiCommandService {
     } else {
       throw Exception('No transport available for commands');
     }
-  }
-
-  /// Get system timezone offset in hours
-  ///
-  /// Try offset in simple hours (not 15-min blocks as proto comments suggest)
-  /// Examples:
-  /// - UTC+1 (Madrid) → 1
-  /// - UTC-5 (New York) → -5
-  /// - UTC+9 (Tokyo) → 9
-  static int _getTimezoneOffset(String timezone) {
-    // Map common timezones to their UTC offset in HOURS
-    const offsetHours = {
-      'UTC': 0,
-      'Europe/London': 0,
-      'Europe/Madrid': 1, // UTC+1
-      'Europe/Paris': 1,
-      'Europe/Berlin': 1,
-      'Europe/Rome': 1,
-      'Europe/Amsterdam': 1,
-      'America/New_York': -5,
-      'America/Chicago': -6,
-      'America/Denver': -7,
-      'America/Los_Angeles': -8,
-      'America/Mexico_City': -6,
-      'Asia/Tokyo': 9,
-      'Asia/Shanghai': 8,
-      'Australia/Sydney': 10,
-    };
-
-    return offsetHours[timezone] ?? 0;
-  }
-
-  /// Get system timezone name
-  static String _getSystemTimezone() {
-    // TODO: Use package:timezone to get actual system timezone
-    return 'UTC';
   }
 
   /// Cleanup

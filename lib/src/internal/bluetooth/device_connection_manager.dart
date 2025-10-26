@@ -1051,10 +1051,37 @@ class DeviceConnectionManager {
 
           // ✅ Use DeviceAdapter.fromInternal() to enrich device
           // storage: _discoveredDeviceStorage = bonded device (try loading saved copy)
-          final enrichedDevice = await DeviceAdapter.fromInternal(
+          var enrichedDevice = await DeviceAdapter.fromInternal(
             btDevice,
             storage: _discoveredDeviceStorage,
           );
+
+          // ✅ NEW: For Xiaomi devices, check if credentials are saved
+          // If paired but no credentials, mark as requiresAuthentication=true
+          if (enrichedDevice.authenticationMethod ==
+                  AuthenticationType.xiaomiSpp &&
+              enrichedDevice.isPairedToSystem) {
+            final hasCredentials = await DeviceAdapter.hasXiaomiCredentials(
+              enrichedDevice.deviceId,
+            );
+
+            if (!hasCredentials) {
+              debugPrint(
+                '   🔑 [Bonded Xiaomi] No credentials found - marking as requiresAuthentication=true',
+              );
+              enrichedDevice = enrichedDevice.copyWith(
+                requiresAuthentication: true,
+              );
+            } else {
+              debugPrint(
+                '   🔑 [Bonded Xiaomi] Credentials found - device ready to connect',
+              );
+              enrichedDevice = enrichedDevice.copyWith(
+                requiresAuthentication: false,
+              );
+            }
+          }
+
           _deviceStates[btDevice.deviceId] = enrichedDevice;
 
           debugPrint('   ✅ Enriched device: ${btDevice.name}');
@@ -1062,6 +1089,9 @@ class DeviceConnectionManager {
             '      - Services: ${enrichedDevice.discoveredServices.length}',
           );
           debugPrint('      - Device Type: ${enrichedDevice.deviceTypeId}');
+          debugPrint(
+            '      - requiresAuthentication: ${enrichedDevice.requiresAuthentication}',
+          );
         } catch (e, stackTrace) {
           debugPrint('   ⚠️  Error enriching device ${btDevice.deviceId}: $e');
           debugPrint('   Stack trace: $stackTrace');
@@ -1097,7 +1127,7 @@ class DeviceConnectionManager {
       );
       for (final device in _deviceStates.values) {
         debugPrint(
-          '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}',
+          '      - ${device.name}: isPaired=${device.isPairedToSystem}, isNearby=${device.isNearby}, services=${device.discoveredServices.length}, requiresAuth=${device.requiresAuthentication}',
         );
       }
       _deviceStatesController.add(Map.unmodifiable(_deviceStates));
