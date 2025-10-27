@@ -182,38 +182,40 @@ class XiaomiSppRealtimeStatsParser {
       }
 
       // 6. Parse Steps (cumulative during session)
-      if (stats.hasSteps() && stats.steps > 0) {
-        samples.add(
-          BiometricSample(
-            timestamp: timestamp,
-            value: stats.steps.toDouble(),
-            sensorType: SensorType.steps,
-            metadata: {
-              'unit': 'count',
-              'source': 'xiaomi_spp_realtime',
-              'transport': 'bt_classic',
-              'cumulative': true, // Important: not delta, absolute count
-            },
-          ),
-        );
-      }
+      // ⚠️ IMPORTANT: Always emit, even if 0
+      // App layer needs to track changes: if steps stays same → no movement
+      samples.add(
+        BiometricSample(
+          timestamp: timestamp,
+          value: stats.steps.toDouble(),
+          sensorType: SensorType.steps,
+          metadata: {
+            'unit': 'count',
+            'source': 'xiaomi_spp_realtime',
+            'transport': 'bt_classic',
+            'cumulative': true, // Important: not delta, absolute count
+            'note': 'always emitted for change detection',
+          },
+        ),
+      );
 
-      // 7. Parse Calories (bonus data)
-      if (stats.hasCalories() && stats.calories > 0) {
-        samples.add(
-          BiometricSample(
-            timestamp: timestamp,
-            value: stats.calories.toDouble(),
-            sensorType: SensorType.calories,
-            metadata: {
-              'unit': 'kcal',
-              'source': 'xiaomi_spp_realtime',
-              'transport': 'bt_classic',
-              'cumulative': true,
-            },
-          ),
-        );
-      }
+      // 7. Parse Calories (for movement detection)
+      // ⚠️ IMPORTANT: Always emit, even if 0
+      // App layer needs to track changes: if calories stays same → no movement
+      samples.add(
+        BiometricSample(
+          timestamp: timestamp,
+          value: stats.calories.toDouble(),
+          sensorType: SensorType.calories,
+          metadata: {
+            'unit': 'kcal',
+            'source': 'xiaomi_spp_realtime',
+            'transport': 'bt_classic',
+            'cumulative': true,
+            'note': 'always emitted for change detection',
+          },
+        ),
+      );
 
       // 8. Parse Standing Hours (bonus data) - No SensorType equivalent, use unknown
       if (stats.hasStandingHours() && stats.standingHours > 0) {
