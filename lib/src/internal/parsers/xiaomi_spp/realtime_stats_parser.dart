@@ -1,74 +1,14 @@
 import 'dart:typed_data';
 
 import 'package:flutter/rendering.dart';
-import 'dart:math';
 
 import 'package:wearable_sensors/src/api/enums/sensor_type.dart';
 import '../../models/biometric_sample.dart';
 import 'package:wearable_sensors/src/internal/models/generated/xiaomi.pb.dart'
     as pb;
 
-/// 🎯 Movement Filter: Smooths binary movement detection using mode window
-///
-/// Problem: Raw movement detection produces false positives during transitions
-/// (e.g., 0→1→0 within 1-5 seconds during sleep onset/offset)
-///
-/// Solution: Apply a sliding mode window to the binary movement stream
-/// - Window size 20: Requires sustained movement for ~20 readings (~100 seconds)
-/// - Only flips to 1 if majority of recent readings show movement
-///
-/// NOTE: This is a sensor-level filter for movement normalization.
-/// Sleep phase determination (awake/sleeping) is handled by application layer
-/// (dream_incubator SleepStateClassifier) after collecting sufficient data.
-class _MovementFilter {
-  final int windowSize;
-  final List<int> _buffer = [];
-
-  _MovementFilter({this.windowSize = 20})
-      : assert(windowSize > 0, 'Window size must be positive');
-
-  /// Add a new movement reading and return smoothed value
-  /// Returns: 1 if majority of window shows movement, 0 otherwise
-  int apply(int movementBinary) {
-    assert(
-      movementBinary == 0 || movementBinary == 1,
-      'Movement must be binary (0 or 1)',
-    );
-
-    _buffer.add(movementBinary);
-
-    // Keep buffer at max size
-    if (_buffer.length > windowSize) {
-      _buffer.removeAt(0);
-    }
-
-    // Need at least half the window filled before filtering
-    if (_buffer.length < windowSize) {
-      // Before window is full, return the current value
-      return movementBinary;
-    }
-
-    // Calculate mode (most common value)
-    int count0 = 0;
-    int count1 = 0;
-
-    for (final val in _buffer) {
-      if (val == 0) {
-        count0++;
-      } else {
-        count1++;
-      }
-    }
-
-    // Return 1 if majority are 1s, otherwise 0
-    return count1 > count0 ? 1 : 0;
-  }
-
-  /// Reset filter
-  void reset() {
-    _buffer.clear();
-  }
-}
+// Note: Movement smoothing and HRV tracking previously lived here. Both have
+// been moved to the application layer to keep the sensor parser minimal.
 
 /// Parser for Xiaomi SPP Realtime Stats (multi-sensor data)
 ///
@@ -108,165 +48,7 @@ class _MovementFilter {
 /// This tracker now focuses on:
 /// - Raw binary movement detection (changed any of steps/calories/unknown3)
 /// - HRV calculation from HR history
-class _RealtimeStatsTracker {
-  static final _RealtimeStatsTracker _instance =
-      _RealtimeStatsTracker._internal();
-
-  factory _RealtimeStatsTracker() {
-    return _instance;
-  }
-
-  _RealtimeStatsTracker._internal();
-
-  int? previousUnknown3;
-  int? previousSteps;
-  int? previousUnknown5;
-  int? previousCalories;
-
-  // ✨ Track HR history for HRV calculation
-  final List<int> _hrHistory = [];
-  static const int _maxHrHistorySize = 120; // ~2 minutes at 1Hz
-
-  // 🎯 Movement filter for smoothing binary detection
-  // Window of 20 readings (~100 seconds) to eliminate false positives
-  final _MovementFilter _movementFilter = _MovementFilter(windowSize: 20);
-
-  bool isUnknown3Updated(int current) {
-    final updated = previousUnknown3 != current;
-    previousUnknown3 = current;
-    return updated;
-  }
-
-  bool isStepsUpdated(int current) {
-    final updated = previousSteps != current;
-    previousSteps = current;
-    return updated;
-  }
-
-  bool isUnknown5Updated(int current) {
-    final updated = previousUnknown5 != current;
-    previousUnknown5 = current;
-    return updated;
-  }
-
-  bool isCaloriesUpdated(int current) {
-    final updated = previousCalories != current;
-    previousCalories = current;
-    return updated;
-  }
-
-  /// Detect if movement has changed (binary detector, no state machine)
-  /// Returns: 1 if ANY of (steps, calories, unknown3) changed, 0 otherwise
-  /// Applies smoothing filter to reduce false positives during transitions
-  int detectMovementChange({
-    required int currentSteps,
-    required int currentCalories,
-    required int currentUnknown3,
-  }) {
-    // First call: initialize previous values
-    if (previousSteps == null) {
-      previousSteps = currentSteps;
-      previousCalories = currentCalories;
-      previousUnknown3 = currentUnknown3;
-      debugPrint('   📊 MOVEMENT: Initialized (assume awake)');
-      return 1; // Assume awake at startup
-    }
-
-    // Detect if any value changed (raw binary)
-    final rawMovement = (currentSteps != previousSteps ||
-            currentCalories != previousCalories ||
-            currentUnknown3 != previousUnknown3)
-        ? 1
-        : 0;
-
-    // Apply smoothing filter (mode window of 20 readings ~100 seconds)
-    final smoothed = _movementFilter.apply(rawMovement);
-
-    // Debug log when movement state changes
-    final previousSmoothed = _movementFilter._buffer.length >= 2
-        ? (_movementFilter._buffer[_movementFilter._buffer.length - 2])
-        : smoothed;
-
-    if (smoothed != previousSmoothed || rawMovement == 1) {
-      final deltaSteps = currentSteps - (previousSteps ?? 0);
-      final deltaCal = currentCalories - (previousCalories ?? 0);
-      final deltaUnk3 = currentUnknown3 - (previousUnknown3 ?? 0);
-
-      debugPrint(
-        '   📊 MOVEMENT: raw=$rawMovement → smoothed=$smoothed '
-        '| window=${_movementFilter._buffer.length}/20 '
-        '| Δsteps=$deltaSteps Δcal=$deltaCal Δunk3=$deltaUnk3',
-      );
-    }
-
-    // Save current values for next comparison
-    previousSteps = currentSteps;
-    previousCalories = currentCalories;
-    previousUnknown3 = currentUnknown3;
-
-    return smoothed;
-  }
-
-  /// Calculate HRV from HR history (Heart Rate Variability)
-  ///
-  /// HRV = standard deviation of RR intervals (time between beats)
-  /// Approximation from equally-sampled HR values
-  /// Calibrated from real overnight data (6+ hours):
-  /// - Low HRV (<10) = deep sleep, parasympathetic dominant (observed 8-13ms)
-  /// - Medium HRV (10-20) = light sleep, stable (observed 13-20ms during real sleep)
-  /// - Transition zone (20-30) = relaxation/awake calm, avoid false positives (observed 10-16ms when awake but still)
-  /// - High HRV (>30) = REM/active dreaming, sympathetic active (observed 25-90ms during actual REM)
-  ///
-  /// NOTE: Sleep phase classification thresholds have been moved to
-  /// dream_incubator's SleepStateClassifier for application-specific logic
-
-  double calculateHRV(int currentHR) {
-    // Add current HR to history
-    _hrHistory.add(currentHR);
-
-    // Keep only last 120 samples (~2 minutes)
-    if (_hrHistory.length > _maxHrHistorySize) {
-      _hrHistory.removeAt(0);
-    }
-
-    // Need at least 10 samples to calculate meaningful HRV
-    if (_hrHistory.length < 10) {
-      return 0.0;
-    }
-
-    // Calculate RR intervals (simplified: 60000 / HR in milliseconds)
-    final rrIntervals = <double>[];
-    for (final hr in _hrHistory) {
-      if (hr > 0) {
-        final rrInterval = 60000.0 / hr; // Convert BPM to RR interval (ms)
-        rrIntervals.add(rrInterval);
-      }
-    }
-
-    if (rrIntervals.length < 2) {
-      return 0.0;
-    }
-
-    // Calculate mean RR interval
-    final meanRR = rrIntervals.reduce((a, b) => a + b) / rrIntervals.length;
-
-    // Calculate standard deviation (SDNN - HRV metric)
-    final variance = rrIntervals
-            .map((rr) => (rr - meanRR) * (rr - meanRR))
-            .reduce((a, b) => a + b) /
-        rrIntervals.length;
-
-    final hrv = (variance >= 0) ? sqrt(variance) : 0.0;
-
-    return hrv;
-  }
-
-  /// Get HR history for trend analysis
-  List<int> getHRHistory() => List.unmodifiable(_hrHistory);
-
-  /// Clear HRV history (e.g., when session ends)
-  void clearHRHistory() => _hrHistory.clear();
-}
+// (intentionally empty)
 
 class XiaomiSppRealtimeStatsParser {
   /// Parse realtime stats from SPP protobuf bytes
@@ -343,28 +125,22 @@ class XiaomiSppRealtimeStatsParser {
       final samples = <BiometricSample>[];
 
       // ✨ NEW: Calculate HRV and detect movement (for all samples)
-      final tracker = _RealtimeStatsTracker();
-      double hrv = 0.0;
-      int movementBinary = 0;
+      // Tracker retained for potential future extensions; not used here.
+      // NOTE: Do NOT calculate/emit HRV here for devices without native RR.
+      // HRV calculation is delegated to the application layer (dream_incubator)
+      // where longer windows and better smoothing can be applied.
+      // Note: movementBinary computation removed (handled at app layer)
 
       // Only calculate HRV for physiologically valid HR values
-      if (stats.hasHeartRate() &&
-          isValidHeartRate(stats.heartRate.toDouble())) {
-        hrv = tracker.calculateHRV(stats.heartRate);
-      }
+      // Previously: Derived HRV proxy here via tracker.calculateHRV(currentHR)
+      // Removed: avoid computing here to keep sensor layer simple.
 
-      if (stats.hasSteps() || stats.hasCalories() || stats.hasUnknown3()) {
-        movementBinary = tracker.detectMovementChange(
-          currentSteps: stats.steps,
-          currentCalories: stats.calories,
-          currentUnknown3: stats.unknown3,
-        );
-      }
+      // Movement change detection is not emitted here anymore.
 
       // 4. Parse Heart Rate (most critical for lucid dreaming)
-      // Only include physiologically valid HR values (40-220 BPM)
-      if (stats.hasHeartRate() &&
-          isValidHeartRate(stats.heartRate.toDouble())) {
+      // Include HR when > 10 BPM. Mark validity in metadata.
+      // Rationale: Extremely low values (<=10) are noise and should be dropped.
+      if (stats.hasHeartRate() && stats.heartRate > 10) {
         samples.add(
           BiometricSample(
             timestamp: timestamp,
@@ -374,48 +150,18 @@ class XiaomiSppRealtimeStatsParser {
               'unit': 'bpm',
               'source': 'xiaomi_spp_realtime',
               'transport': 'bt_classic',
-              'valid': true, // Already validated above
+              // Valid range per parser policy: 40-220 bpm
+              'valid': isValidHeartRate(stats.heartRate.toDouble()),
             },
           ),
         );
 
-        // ✨ NEW: Add HRV sample
-        samples.add(
-          BiometricSample(
-            timestamp: timestamp,
-            value: hrv,
-            sensorType: SensorType.heartRateVariability,
-            metadata: {
-              'unit': 'ms',
-              'source': 'xiaomi_spp_hrv_calculation',
-              'transport': 'bt_classic',
-              'data_type_name': 'hrv_sdnn',
-              'note':
-                  'Standard deviation of RR intervals (calculated from HR history)',
-              'raw_hrv_value': hrv,
-            },
-          ),
-        );
+        // Removed: HRV synthetic sample emission for Xiaomi SPP path.
+        // Rationale: Let app compute HRV proxies centrally from HR history.
       }
 
-      // ✨ NEW: Add binary movement detection (only if there's actually movement data)
-      if (stats.hasSteps() || stats.hasCalories() || stats.hasUnknown3()) {
-        samples.add(
-          BiometricSample(
-            timestamp: timestamp,
-            value: movementBinary.toDouble(),
-            sensorType: SensorType.movementDetected,
-            metadata: {
-              'unit': 'binary',
-              'source': 'xiaomi_spp_movement_detector',
-              'transport': 'bt_classic',
-              'data_type_name': 'movement_detected',
-              'note':
-                  '1=movement detected (steps|calories|unknown3 changed), 0=no movement',
-            },
-          ),
-        );
-      }
+      // Note: Do NOT emit binary movementDetected at sensor level.
+      // Binary smoothing/classification belongs to application layer.
 
       // 5. Parse Movement Intensity (via unknown3 - activity proxy)
       // This field increases during physical activity (Gadgetbridge finding)

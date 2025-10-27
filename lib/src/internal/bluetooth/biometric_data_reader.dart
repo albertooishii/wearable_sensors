@@ -609,13 +609,11 @@ class BiometricDataReader {
                 for (final sample in samples) {
                   // Enhanced logging for each sensor with metadata
                   final metadata = sample.metadata ?? {};
-                  final sensorDisplayName = sample.sensorType.displayName;
-                  final unit = metadata['unit'] ?? 'unknown';
                   final dataTypeName = metadata['data_type_name'] ?? 'standard';
 
-                  debugPrint(
+                  /*debugPrint(
                     '   📊 Yielding: $sensorDisplayName = ${sample.value} [$unit] ($dataTypeName)',
-                  );
+                  );**/
 
                   // Log additional metadata for investigation sensors
                   if (sample.sensorType == SensorType.unknown ||
@@ -696,40 +694,6 @@ class BiometricDataReader {
         }
 
         debugPrint('   ✅ Parsed ${samples.length} samples');
-
-        // Yield cada sensor individualmente
-        for (final sample in samples) {
-          // Enhanced logging with full metadata
-          final metadata = sample.metadata ?? {};
-          final sensorDisplayName = sample.sensorType.displayName;
-          final unit = metadata['unit'] ?? 'unknown';
-          final dataTypeName = metadata['data_type_name'] ?? 'standard';
-
-          debugPrint(
-            '   📊 Yielding: $sensorDisplayName = ${sample.value} [$unit] (from: $dataTypeName)',
-          );
-
-          // Extra logging for movement and unknown sensors
-          if (sensorDisplayName.toLowerCase().contains('movement')) {
-            final movementClassification = sample.value == 0
-                ? 'NONE'
-                : sample.value <= 5
-                    ? 'MINIMAL'
-                    : sample.value <= 15
-                        ? 'MODERATE'
-                        : 'HIGH';
-            debugPrint(
-              '      🎯 Movement Level: $movementClassification (intensity: ${sample.value})',
-            );
-          } else if (sample.sensorType == SensorType.unknown) {
-            final note = metadata['note'] ?? '';
-            debugPrint(
-              '      ❓ Unknown sensor ($dataTypeName): $note',
-            );
-          }
-
-          yield sample;
-        }
       }
     } on Exception catch (e) {
       debugPrint('❌ subscribeToRealtimeStats failed: $e');
