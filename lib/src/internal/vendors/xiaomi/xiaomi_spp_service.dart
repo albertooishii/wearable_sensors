@@ -853,7 +853,14 @@ class XiaomiSppService {
 
       // ✅ FIRST: Check if this is a Version handshake response (V1 packet)
       // Version uses V1 protocol even for V2 devices
-      final v1Packet = XiaomiSppPacketV1.decode(bufferBytes);
+      // Guard: Only attempt V1 decode if buffer starts with V1 preamble [ba dc fe]
+      XiaomiSppPacketV1? v1Packet;
+      if (bufferBytes.length >= 3 &&
+          bufferBytes[0] == 0xBA &&
+          bufferBytes[1] == 0xDC &&
+          bufferBytes[2] == 0xFE) {
+        v1Packet = XiaomiSppPacketV1.decode(bufferBytes);
+      }
       if (v1Packet != null && v1Packet.channel == XiaomiSppChannel.version) {
         // debugPrint('📦 SPP V1: Received Version handshake response');
         // debugPrint('   OpCode: 0x${v1Packet.opCode.toRadixString(16)}');

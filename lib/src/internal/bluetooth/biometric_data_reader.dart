@@ -563,29 +563,29 @@ class BiometricDataReader {
     }
 
     try {
-      // debugPrint('📊 Subscribing to realtime stats for $deviceId');
-      // debugPrint('   🔍 Listening to SPP data stream...');
+      debugPrint('📊 Subscribing to realtime stats for $deviceId');
+      debugPrint('   🔍 Listening to SPP data stream...');
 
       // Subscribe to SPP data stream
       await for (final packet in sppService.dataStream) {
-        // debugPrint(
-        //   '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}, channel=${packet.channel}',
-        // );
+        debugPrint(
+          '   📦 Received packet: deviceId=${packet.deviceId}, size=${packet.data.length}, channel=${packet.channel}',
+        );
 
         if (packet.deviceId != deviceId) {
-          // debugPrint('   ⏭️  Skipping packet from different device');
+          debugPrint('   ⏭️  Skipping packet from different device');
           continue;
         }
 
         // ✅ CRITICAL: Check packet channel to determine how to process
         if (packet.channel == 'activity') {
           // Activity channel: Raw sensor data, often contains realtime stats
-          // debugPrint(
-          //   '   📊 Activity channel detected - attempting to parse sensor data',
-          // );
-          // debugPrint(
-          //   '   📋 Payload size: ${packet.data.length} bytes',
-          // );
+          debugPrint(
+            '   📊 Activity channel detected - attempting to parse sensor data',
+          );
+          debugPrint(
+            '   📋 Payload size: ${packet.data.length} bytes',
+          );
 
           // Try to parse using the xiaomi realtime stats multi-parser.
           // This parser handles:
@@ -611,16 +611,16 @@ class BiometricDataReader {
                   final metadata = sample.metadata ?? {};
                   final dataTypeName = metadata['data_type_name'] ?? 'standard';
 
-                  /*debugPrint(
-                    '   📊 Yielding: $sensorDisplayName = ${sample.value} [$unit] ($dataTypeName)',
-                  );**/
+                  debugPrint(
+                    '      � [Reader] Yielding sample: sensorType=${sample.sensorType.name}, value=${sample.value}',
+                  );
 
                   // Log additional metadata for investigation sensors
                   if (sample.sensorType == SensorType.unknown ||
                       dataTypeName.contains('unknown')) {
                     final note = metadata['note'] ?? '';
                     debugPrint(
-                      '      ℹ️  Unknown sensor details: $note',
+                      '         ℹ️  Unknown sensor details: $note',
                     );
                   }
 
@@ -670,30 +670,26 @@ class BiometricDataReader {
 
         // Filter realtime stats events (type=8, subtype=47)
         if (!isRealtimeStatsEvent(command)) {
-          debugPrint(
-            '   ⏭️  Skipping non-realtime-stats command (type=${command.type}, subtype=${command.subtype})',
-          );
           continue;
         }
-
-        debugPrint('   🎯 Processing realtime stats event...');
 
         // Parse multi-sensor data
         final parser = ParserRegistry.getMultiParser(
           'xiaomi_spp_realtime_stats',
         );
         if (parser == null) {
-          debugPrint('❌ Parser "xiaomi_spp_realtime_stats" not found');
           continue;
         }
 
         final samples = parser(packet.data);
         if (samples == null || samples.isEmpty) {
-          debugPrint('   ⚠️  Parser returned null or empty samples');
           continue;
         }
 
-        debugPrint('   ✅ Parsed ${samples.length} samples');
+        // 🎯 CRITICAL: Yield each sample to stream
+        for (final sample in samples) {
+          yield sample;
+        }
       }
     } on Exception catch (e) {
       debugPrint('❌ subscribeToRealtimeStats failed: $e');

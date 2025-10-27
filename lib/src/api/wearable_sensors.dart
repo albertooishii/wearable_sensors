@@ -1126,9 +1126,6 @@ class WearableSensors {
           metadata: sample.metadata,
         );
 
-        /*debugPrint(
-          '🎯 [streamMultiple] Yielding: ${sample.sensorType.name} = ${sample.value}',
-        );*/
         yield reading;
       }
     } catch (e, stackTrace) {

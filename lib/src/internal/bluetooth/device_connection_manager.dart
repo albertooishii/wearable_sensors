@@ -1225,9 +1225,15 @@ class DeviceConnectionManager {
       authenticationMethod: authenticationMethod,
     );
 
-    // ✅ Only emit if state actually changed (uses WearableDevice.==)
-    if (currentState == newState) {
-      // No cambios reales, no emitir stream
+    // ✅ Emit rules
+    // Default: Only emit if state actually changed (uses WearableDevice.==)
+    // Special case: lastDataTimestamp updates are NOT part of equality by design
+    //               but we still want a lightweight heartbeat to reach UI/consumers.
+    final bool timestampChanged = lastDataTimestamp != null &&
+        currentState.lastDataTimestamp != lastDataTimestamp;
+
+    if (currentState == newState && !timestampChanged) {
+      // No cambios reales y no heartbeat de timestamp: no emitir stream
       debugPrint('🔍 [_updateDeviceState] No changes detected, skipping emit');
       return;
     }
@@ -1239,6 +1245,11 @@ class DeviceConnectionManager {
       '   - currentState.connectionState: ${currentState.connectionState}',
     );
     debugPrint('   - newState.connectionState: ${newState.connectionState}');
+    if (timestampChanged && currentState == newState) {
+      debugPrint(
+        '   ⏱️ Heartbeat emit due to lastDataTimestamp change (${currentState.lastDataTimestamp} -> $lastDataTimestamp)',
+      );
+    }
     debugPrint('   ✅ emitting deviceStatesStream');
 
     _deviceStates[deviceId] = newState;
