@@ -57,33 +57,30 @@ class XiaomiCommandService {
       dateTime ??= DateTime.now();
       final tz = timezone ?? XiaomiTimezoneHelper.getSystemTimezoneName();
 
-      // Device appears to have UTC+2 hardcoded and ignores zoneOffset field.
-      // To show the correct time, we just subtract the device's internal offset
-      // and let it add its 2 hours back.
+      // ⚠️ WORKAROUND: Device appears to calculate its own offset incorrectly
+      // and ignores the zoneOffset field we send in the protobuf message.
       //
-      // Example: Madrid, device is UTC+2
-      //   - User time: 14:00 Madrid
-      //   - We send: 14:00 - 2 = 12:00
-      //   - Device adds 2: 12:00 + 2 = 14:00 ✓
+      // SOLUTION: Send UTC time directly and let the device apply timezone by name.
+      // The timezone name (e.g., 'Europe/Madrid') should handle DST automatically.
       //
-      // The timezone name (e.g., 'Europe/Madrid') handles all DST logic on the device side.
-
-      const int deviceInternalOffset = 2; // Device is UTC+2
-      final adjustedDateTime =
-          dateTime.subtract(const Duration(hours: deviceInternalOffset));
+      // Example: Madrid at 14:00 local time
+      //   - Local time: 14:00 (UTC+1 in winter, UTC+2 in summer)
+      //   - We send: 13:00 UTC (14:00 - 1h offset)
+      //   - Device applies 'Europe/Madrid' TZ → displays 14:00 ✓
+      final adjustedDateTime = dateTime.toUtc();
 
       debugPrint(
         '   Local time: ${dateTime.toIso8601String()} (timezone: $tz)',
       );
       debugPrint(
-        '   Device internal offset: UTC+$deviceInternalOffset',
+        '   UTC time to send: ${adjustedDateTime.toIso8601String()}',
       );
       debugPrint(
-        '   Time to send: ${adjustedDateTime.toIso8601String()}',
+        '   Device will apply timezone: $tz',
       );
 
       // Build Clock protobuf message
-      // Send the ADJUSTED time and let the device add its 2 hours
+      // Send UTC time and let device apply timezone by name (handles DST automatically)
       final clock = pb.Clock()
         ..date = (pb.Date()
           ..year = adjustedDateTime.year
