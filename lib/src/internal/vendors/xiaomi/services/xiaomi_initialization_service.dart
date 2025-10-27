@@ -157,17 +157,17 @@ class XiaomiInitializationService {
 
       final now = DateTime.now();
 
-      // Device appears to have UTC+2 hardcoded internally and ignores zoneOffset.
-      // To show the correct time, we subtract the device's internal offset (2 hours)
-      // and let it add its 2 hours back.
+      // ⚠️ WORKAROUND: Device appears to calculate its own offset incorrectly
+      // and ignores the zoneOffset field we send in the protobuf message.
       //
-      // Example: Madrid UTC+2
-      //   - User time: 02:59 Madrid
-      //   - We send: 02:59 - 2 = 00:59
-      //   - Device adds 2: 00:59 + 2 = 02:59 ✓
-      const int deviceInternalOffset = 2; // Device has UTC+2 hardcoded
-      final timeToSend =
-          now.subtract(const Duration(hours: deviceInternalOffset));
+      // SOLUTION: Send UTC time directly and let the device apply timezone by name.
+      // The timezone name (e.g., 'Europe/Madrid') should handle DST automatically.
+      //
+      // Example: Madrid at 14:00 local time
+      //   - Local time: 14:00 (UTC+1 in winter, UTC+2 in summer)
+      //   - We send: 13:00 UTC (14:00 - 1h offset)
+      //   - Device applies 'Europe/Madrid' TZ → displays 14:00 ✓
+      final timeToSend = now.toUtc();
 
       // Create Date structure
       final date = pb.Date.create()
@@ -182,13 +182,12 @@ class XiaomiInitializationService {
         ..second = timeToSend.second
         ..millisecond = timeToSend.millisecond;
 
-      // Create TimeZone structure with system timezone
-      // The device ignores zoneOffset and uses its internal UTC+2 hardcoded
-      // So we just send 0 for the offset
-      final offset = 0; // Device has its own internal offset
-
       // Get system timezone name
       String tzName = XiaomiTimezoneHelper.getSystemTimezoneName();
+
+      // Create TimeZone structure
+      // Send UTC time (offset=0) and let device apply timezone by name
+      final offset = 0; // Always 0 for UTC time
 
       final timezone = pb.TimeZone.create()
         ..zoneOffset = offset
@@ -210,14 +209,14 @@ class XiaomiInitializationService {
 
       debugPrint(
         '   📅 Local time: ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} ($tzName)',
       );
       debugPrint(
-        '   📅 Time to send (local - 2h): ${timeToSend.year}-${timeToSend.month.toString().padLeft(2, '0')}-${timeToSend.day.toString().padLeft(2, '0')} '
+        '   📅 UTC time to send: ${timeToSend.year}-${timeToSend.month.toString().padLeft(2, '0')}-${timeToSend.day.toString().padLeft(2, '0')} '
         '${timeToSend.hour.toString().padLeft(2, '0')}:${timeToSend.minute.toString().padLeft(2, '0')}:${timeToSend.second.toString().padLeft(2, '0')}',
       );
       debugPrint(
-        '   🌍 Timezone: $tzName (device internal offset: UTC+2)',
+        '   🌍 Device will apply timezone: $tzName',
       );
 
       if (sppV2Handler != null) {
