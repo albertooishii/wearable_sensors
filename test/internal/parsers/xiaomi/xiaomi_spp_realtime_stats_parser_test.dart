@@ -165,7 +165,7 @@ void main() {
 
       test('returns null when all values are zero/invalid', () {
         final stats = pb.RealTimeStats.create()
-          ..heartRate = 0 // Invalid
+          ..heartRate = 0 // Invalid (<=10 filtered)
           ..steps = 0
           ..calories = 0
           ..unknown3 = 0
@@ -180,8 +180,19 @@ void main() {
         final bytes = command.writeToBuffer();
         final samples = XiaomiSppRealtimeStatsParser.parse(bytes);
 
-        // All samples filtered out → null
-        expect(samples, isNull);
+        // ✅ FIXED: Steps and calories are ALWAYS emitted (even if 0)
+        // Rationale: Reset at midnight means 0 is a valid value
+        // App layer needs these for change detection
+        expect(samples, isNotNull);
+        expect(samples!.length, equals(2)); // Steps + Calories
+        expect(
+          samples.any((final s) => s.sensorType == SensorType.steps),
+          isTrue,
+        );
+        expect(
+          samples.any((final s) => s.sensorType == SensorType.calories),
+          isTrue,
+        );
       });
 
       test('handles partial data (only HR)', () {
@@ -197,9 +208,25 @@ void main() {
         final samples = XiaomiSppRealtimeStatsParser.parse(bytes);
 
         expect(samples, isNotNull);
-        expect(samples!.length, equals(1)); // Only HR
-        expect(samples.first.sensorType, equals(SensorType.heartRate));
-        expect(samples.first.value, equals(82.0));
+        // ✅ FIXED: Should have HR + Steps (0) + Calories (0)
+        // Steps and calories always emitted for change detection
+        expect(samples!.length, equals(3)); // HR + Steps + Calories
+
+        final hrSample = samples.firstWhere(
+          (final s) => s.sensorType == SensorType.heartRate,
+        );
+        expect(hrSample.value, equals(82.0));
+
+        // Verify steps and calories are present with 0 values
+        final stepsSample = samples.firstWhere(
+          (final s) => s.sensorType == SensorType.steps,
+        );
+        expect(stepsSample.value, equals(0.0));
+
+        final caloriesSample = samples.firstWhere(
+          (final s) => s.sensorType == SensorType.calories,
+        );
+        expect(caloriesSample.value, equals(0.0));
       });
 
       test('marks HR as invalid when out of physiological range', () {
