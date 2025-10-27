@@ -4,7 +4,7 @@ import 'package:mockito/mockito.dart';
 /// Mock para rootBundle que carga desde el JSON file del package
 class MockAssetBundle extends Mock implements AssetBundle {
   static const Map<String, String> _assetCache = {
-    'assets/data/device_types.json': '''
+    'packages/wearable_sensors/assets/data/device_types.json': '''
 [
     {
         "id": "xiaomi_mi_band",
