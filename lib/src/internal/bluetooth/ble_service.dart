@@ -508,6 +508,15 @@ class BleService {
   Future<List<BluetoothDevice>> getSystemDevices() async {
     debugPrint('🔍 [BLE_SERVICE] getSystemDevices() called START');
     try {
+      // 🚫 Guard: Avoid calling bondedDevices without BLUETOOTH_CONNECT permission
+      final hasBtPerms = await PermissionsService.areAllPermissionsGranted();
+      if (!hasBtPerms) {
+        debugPrint(
+          '🔍 [BLE_SERVICE] Skipping bondedDevices: missing Bluetooth permissions',
+        );
+        return [];
+      }
+
       debugPrint('🔍 Getting BONDED devices (paired in Android Settings)...');
       debugPrint('📱 Platform: Android');
       debugPrint('🚀 Using: FlutterBluePlus.bondedDevices');
@@ -541,10 +550,11 @@ class BleService {
         debugPrint(
           '🔍 [BLE_SERVICE] Returned as Future<List<BluetoothDevice>>',
         );
-      } catch (e) {
+      } on Exception catch (e) {
+        // Gracefully handle SecurityException/Permission errors
         debugPrint('🔍 [BLE_SERVICE] ❌ bondedDevices failed: $e');
         debugPrint('🔍 [BLE_SERVICE] Exception type: ${e.runtimeType}');
-        rethrow;
+        return [];
       }
 
       debugPrint(
