@@ -134,7 +134,9 @@ class BleService {
       // 🔄 Recrear StreamControllers si fueron cerrados anteriormente
       _recreateControllersIfClosed();
 
-      await _checkBluetoothPermissions();
+      // ⚠️ DEFERRED: Only check permissions, don't request during init
+      // Actual request happens later via requestBluetoothPermissions()
+      await _checkBluetoothPermissions(requestIfMissing: false);
       await _checkBluetoothState();
 
       // Escuchar cambios en el estado de Bluetooth con flutter_blue_plus
@@ -167,11 +169,16 @@ class BleService {
     }
   }
 
-  /// Verificar y solicitar permisos de Bluetooth
-  Future<void> _checkBluetoothPermissions() async {
+  /// Verificar y opcionalmente solicitar permisos de Bluetooth
+  ///
+  /// **Parameters:**
+  /// - [requestIfMissing]: If true, requests permissions if not granted. If false, only checks (for deferred requesting).
+  Future<void> _checkBluetoothPermissions({
+    bool requestIfMissing = true,
+  }) async {
     final allGranted = await PermissionsService.areAllPermissionsGranted();
 
-    if (!allGranted) {
+    if (!allGranted && requestIfMissing) {
       debugPrint('⚠️ Some Bluetooth permissions missing. Requesting...');
       await PermissionsService.requestBluetoothPermissions();
       // Location permissions removed - not needed on Android 12+ with BLUETOOTH_SCAN neverForLocation flag
